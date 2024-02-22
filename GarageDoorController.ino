@@ -143,7 +143,9 @@ const int resetPin = 5;
 bool reset = true;
 bool started = true;
 
-const char code[] = "8026";
+#include "secret.h" // contains #define CODE "your secret code"
+
+const char code[] = CODE;
 
 #define maxRetries 3
 
