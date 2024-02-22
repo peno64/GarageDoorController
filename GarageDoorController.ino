@@ -1,4 +1,4 @@
-// Works on both the Arduino Nano and Mega, however don't forget to set this define
+// Works on both the Arduino Nano and Mega
 
 // See https://community.platformio.org/t/mqtt-with-arduino-nano-and-enc2860/34236/7
 // See https://pubsubclient.knolleary.net/
@@ -21,38 +21,82 @@
 /*
 
 Following must be added to configuration.yaml of HA:
+This example is for 2 garage doors but can be any number
+
+input_text:
+  garagecode_input:
+    name: Garage code
+    initial: ""
+    min: 0  # Optioneel: minimumwaarde
+    max: 100  # Optioneel: maximumwaarde
+    mode: password  # Optioneel: invoermodus (text of password)
+    icon: mdi:keyboard  # Optioneel: pictogram voor de invoer
 
 mqtt:
   sensor:
     - name: "Garage1"
       unique_id: "Garage1"
-      state_topic: "AtHome/Garage1"
-      value_template: "{{ value_json.value }}"
+      state_topic: "Garage/Garage1"
 
     - name: "Garage2"
       unique_id: "Garage2"
-      state_topic: "AtHome/Garage2"
-      value_template: "{{ value_json.value }}"
+      state_topic: "Garage/Garage2"
 
-    - name: "Testarea"
-      unique_id: "Testarea"
-      state_topic: "AtHome/Testarea"
-      unit_of_measurement: ""
-      value_template: "{{ value_json.msg }}"
+    - name: "GarageStatus"
+      unique_id: "GarageStatus"
+      state_topic: "Garage/Status"
 
-    - name: "Testarea2"
-      unique_id: "Testarea2"
-      state_topic: "AtHome/Testarea2"
+    - name: "GarageMessage"
+      unique_id: "GarageMessage"
+      state_topic: "Garage/Message"
 
-  button:
-    - name: "Testarea Switch1"
-      command_topic: "TestareaSwitchCmd/Switch1"
-      retain: false
-      payload_press: "2"
-    - name: "Testarea Switch2"
-      command_topic: "TestareaSwitchCmd/Switch2"
-      retain: false
-      payload_press: "2"
+switch:
+  - platform: template
+    switches:
+      mqtt_button1:
+        friendly_name: "Garage Switch1"
+        value_template: ""
+        turn_on:
+          service: mqtt.publish
+          data:
+            topic: "GarageCmd/Switch1"
+            payload: "{{ states('input_text.garagecode_input') }}"
+        turn_off:
+          service: mqtt.publish
+          data:
+            topic: "GarageCmd/Switch1"
+            payload: "{{ states('input_text.garagecde_input') }}"
+  - platform: template
+    switches:
+      mqtt_button2:
+        friendly_name: "Garage Switch2"
+        value_template: ""
+        turn_on:
+          service: mqtt.publish
+          data:
+            topic: "GarageCmd/Switch2"
+            payload: "{{ states('input_text.garagecode_input') }}"
+        turn_off:
+          service: mqtt.publish
+          data:
+            topic: "GarageCmd/Switch2"
+            payload: "{{ states('input_text.garagecode_input') }}"
+
+automations.yaml:
+
+- id: '5154208397015'
+  alias: Empty garage code on switch garage
+  description: ''
+  trigger:
+  - platform: state
+    entity_id:
+    - sensor.GarageMessage
+  action:
+  - service: input_text.set_value
+    target:
+      entity_id: input_text.garagecode_input
+    data:
+      value: ''
 
 
 */
@@ -72,8 +116,6 @@ const int updateInterval = 1000; // Interval in milliseconds
 EthernetClient espClient;
 PubSubClient client(espClient);
 
-unsigned long counter = 0;
-
 const unsigned long debounceTime = 100;
 
 struct garageData
@@ -89,8 +131,9 @@ struct garageData
 
 struct garageData garageData[] = 
 {
-  { 3, 6, 8 /* 0 */, /* 8 */ 0, 2, 2, debounceTime * 2, },
-  { 4, 7, /* 9 */ 0, /* 9 */ 0, 2, 2, debounceTime * 2, },
+  { 3, 6, 8 /* 0 */, /* 8 */ 0, 2, 2, debounceTime * 2, }, // Garage 1
+  { 4, 7, /* 9 */ 0, /* 9 */ 0, 2, 2, debounceTime * 2, }, // Garage 2
+  // any number of garages can be added
 };
 
 #define nGarages (sizeof(garageData) / sizeof(*garageData))
@@ -189,17 +232,6 @@ void reconnect()
             }
         }
     }
-}
-
-void sensors()
-{
-  char buf[100];
-
-    sprintf(buf, "{ \"msg\": %d }", ++counter);
-    //// TEST-Message
-    Serial.print("Sending: ");
-    Serial.println(buf);
-    client.publish("Garage/Testarea", buf);
 }
 
 void statusGarage(int index, int statusGarageOpenPin, int statusGarageClosePin, int statusGaragePin, unsigned long &debounceGarage, int &statusGarageOpen, int &statusGarageClose)
@@ -322,8 +354,6 @@ void callback(char* topic, byte* payload, unsigned int length)
       sprintf(buf, "GarageCmd/Switch%d", index + 1);
       if (strcmp(topic, buf) == 0)
       {
-        counter=0;
-
         message("");
         sprintf(buf, "Switch garage %d", index + 1);
         message(buf);
@@ -421,7 +451,6 @@ void loop()
           message("Started");
         }
         mytime = millis();
-        sensors();
     }
 
     clearMessageWhenNeeded();
