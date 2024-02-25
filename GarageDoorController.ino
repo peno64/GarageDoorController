@@ -131,8 +131,8 @@ struct garageData
 
 struct garageData garageData[] = 
 {
-  { 3, 6, 8 /* 0 */, /* 8 */ 0, 2, 2, debounceTime * 2, }, // Garage 1
-  { 4, 7, /* 9 */ 0, /* 9 */ 0, 2, 2, debounceTime * 2, }, // Garage 2
+  { 3, 6, 8, 0, 2, 2, debounceTime * 2, }, // Garage 1
+  { 4, 7, 9, 0, 2, 2, debounceTime * 2, }, // Garage 2
   // any number of garages can be added
 };
 
@@ -278,7 +278,7 @@ void statusGarage(int index, int statusGarageOpenPin, int statusGarageClosePin, 
       debounceGarage = millis();
 
       sprintf(buf2, "Garage/Garage%d", index + 1);
-      sprintf(buf1, statusGarageOpen == 0 ? statusGarageClose == 0 ? "OpenAndClosed" : "Open" : statusGarageClose == 0 ? "Closed" : "Ajar");
+      sprintf(buf1, statusGarageOpen == 0 ? statusGarageClose == 0 ? "Open and Closed" : "Open" : statusGarageClose == 0 ? "Closed" : "In between");
 
       Serial.print(buf2);
       Serial.print(": ");
