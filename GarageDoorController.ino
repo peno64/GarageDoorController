@@ -7,9 +7,34 @@
 // See also for future reference: https://www.instructables.com/DIY-Smart-Garage-Door-Opener-Using-ESP8266-Wemos-D/
 //  This uses https://www.home-assistant.io/integrations/cover.mqtt/
 
+#define SERIALBT
+
+#if defined SERIALBT
+
+#include "BluetoothSerial.h"
+
+#if !defined(CONFIG_BT_ENABLED) || !defined(CONFIG_BLUEDROID_ENABLED)
+#error Bluetooth is not enabled! Please run `make menuconfig` to and enable it
+#endif
+
+BluetoothSerial SerialBT;
+#endif
+
+#define ESP32_WROOM_32
+
+#if defined ESP32_WROOM_32
+#define WIFI
+#endif
+
 #include <PubSubClient.h>
 
-#if defined(__AVR_ATmega328P__) || defined(__AVR_ATmega328__)
+#if defined WIFI
+#include <WiFi.h>
+
+const char* ssid = "peno2 2.4 GHz";
+const char* password = "QueeQueg";
+
+#elif defined(__AVR_ATmega328P__) || defined(__AVR_ATmega328__)
 // Nano
 #include <EthernetENC.h> // uses a bit less memory
 //#include <UIPEthernet.h> // uses a bit more memory
@@ -42,9 +67,9 @@ mqtt:
       unique_id: "Garage2"
       state_topic: "Garage/Garage2"
 
-    - name: "GarageStatus"
-      unique_id: "GarageStatus"
-      state_topic: "Garage/Status"
+    - name: "GarageIP"
+      unique_id: "GarageIP"
+      state_topic: "Garage/IP"
 
     - name: "GarageMessage"
       unique_id: "GarageMessage"
@@ -103,17 +128,28 @@ automations.yaml:
 //#define DHCP
 
 unsigned long mytime = 0;
-const byte mac[] = {0x54, 0x34, 0x41, 0x30, 0x30, 0x31}; // physical mac address
-const byte ip[] = {192, 168, 1, 179};                   // ip in lan
-#if defined DHCP
-IPAddress myDns(192, 168, 1, 1);
-#endif
 const char *mqtt_server = "192.168.1.121";         // => Localhost, MOSQUITTO on own PC
 const char *mqttUser = "";                          // => I have no password and id !!!
 const char *mqttPassword = "";
 
 const int updateInterval = 1000; // Interval in milliseconds
+
+#if defined WIFI
+
+WiFiClient espClient;
+
+#else
+
 EthernetClient espClient;
+
+const byte mac[] = {0x54, 0x34, 0x41, 0x30, 0x30, 0x31}; // physical mac address
+const byte ip[] = {192, 168, 1, 179};                   // ip in lan
+#if defined DHCP
+IPAddress myDns(192, 168, 1, 1);
+#endif
+
+#endif
+
 PubSubClient client(espClient);
 
 const unsigned long debounceTime = 100;
@@ -131,14 +167,20 @@ struct garageData
 
 struct garageData garageData[] = 
 {
+#if defined ESP32_WROOM_32
+  { 25, 18, 21, 0, 2, 2, debounceTime * 2, }, // Garage 1
+  { 26, 19, 22, 0, 2, 2, debounceTime * 2, }, // Garage 2
+  // any number of garages can be added
+#else
   { 3, 6, 8, 0, 2, 2, debounceTime * 2, }, // Garage 1
   { 4, 7, 9, 0, 2, 2, debounceTime * 2, }, // Garage 2
   // any number of garages can be added
+#endif  
 };
 
 #define nGarages (sizeof(garageData) / sizeof(*garageData))
 
-const int resetPin = 5;
+//#define resetPin 5
 
 bool reset = true;
 bool started = true;
@@ -155,11 +197,58 @@ unsigned long prevFail = 0;
 #define clearMessageTimeout 60000
 unsigned long messageTime = 0;
 
+void printSerial(char *data)
+{
+  int l = strlen(data);
+  while (l > 0 && (data[l - 1] == '\r' || data[l - 1] == '\n'))
+    data[--l] = 0;
+  Serial.print(data);
+# if defined SERIAL1
+    Serial1.print(data);
+# endif
+# if defined SERIALBT
+    SerialBT.print(data);
+# endif
+}
+
+void printSerialInt(int a)
+{
+  Serial.print(a);
+# if defined SERIAL1
+    Serial1.print(a);
+# endif
+# if defined SERIALBT
+    SerialBT.print(a);
+# endif
+}
+
+void printSerialln(char *data)
+{
+  if (data != NULL)
+    printSerial(data);
+  Serial.println();
+# if defined SERIAL1
+    Serial1.println();
+# endif
+# if defined SERIALBT
+    SerialBT.println();
+# endif
+}
+
+void printSerialln()
+{
+  printSerialln(NULL);
+}
+
+void(* resetFunc) (void) = 0;       //declare reset function at address 0
+
+#if defined resetPin
+
 void SetupReset()
 {
-  digitalWrite(resetPin, HIGH); // Set digital pin to 5V
+  digitalWrite(resetPin, HIGH); // Set digital pin to HIGH
   delay(200);
-  pinMode(resetPin, OUTPUT); // Make sure it gets the 5V
+  pinMode(resetPin, OUTPUT); // Make sure it gets the HIGH
   delay(200);
   pinMode(resetPin, INPUT_PULLUP); // Change this to a pullup resistor such that arduino can still reset itself (for example upload sketch)
 }
@@ -171,7 +260,15 @@ void DoReset()
   // Should not get here but if it does undo reset
   delay(500);
   SetupReset();
+  resetFunc(); // try a soft reset
 }
+
+#else
+
+#define SetupReset()
+#define DoReset resetFunc
+
+#endif
 
 void clearMessageWhenNeeded()
 {
@@ -197,38 +294,45 @@ void reconnect()
     // Loop until we're reconnected
     while (!client.connected())
     {
-        Serial.print("Attempting MQTT connection (");
-        Serial.print(++count);
-        Serial.print(") ...");
+        printSerial("Attempting MQTT connection (");
+        printSerialInt(++count);
+        printSerial(") ...");
         // Attempt to connect
-        if (client.connect("ArduinoGarage", mqttUser, mqttPassword, "Garage/Status", 1, true, "Offline"))
+        if (client.connect("ArduinoGarage", mqttUser, mqttPassword, "Garage/Message", 1, true, "Offline"))
         {
-            client.publish("Garage/Status", "Online", true);
-            
-            if (reset)
-            {
-              reset = false;
-              message("Reset");
-              started = true;
-            }
-            else
-              message("Reconnected");
-            Serial.println("connected");
-            client.subscribe("GarageCmd/#");
+          IPAddress ip;
+#         if defined WIFI          
+            ip = WiFi.localIP();
+#         else
+            ip = Ethernet.localIP();
+#         endif
+          char sip[16];
+          sprintf(sip, "%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
+          client.publish("Garage/IP", sip, true);
+          if (reset)
+          {
+            reset = false;
+            message("Reset");
+            started = true;
+          }
+          else
+            message("Reconnected");
+          printSerialln("connected");
+          client.subscribe("GarageCmd/#");
         }
         else
-        {
+        {            
+            printSerial("failed, rc=");
+            printSerialInt(client.state());
             if (count >= 10)
             {
-              Serial.println("Unable to connect, reset arduino");
+              printSerialln(" Unable to connect, reset");
               delay(500);
               DoReset();
             }
             else
             {
-              Serial.print("failed, rc=");
-              Serial.print(client.state());
-              Serial.println(" try again in 5 seconds");
+              printSerialln(" try again in 5 seconds");
               // Wait 5 seconds before retrying
               delay(5000);
             }
@@ -257,12 +361,13 @@ void statusGarage(int index, int statusGarageOpenPin, int statusGarageClosePin, 
 
     if (statusGarageOpen0 != statusGarageOpen || statusGarageClose0 != statusGarageClose)
     {
-      Serial.print("change garage ");
-      Serial.print(index + 1);
-      Serial.print(" status: ");
-      Serial.print(statusGarageOpen0);
-      Serial.print(" - ");
-      Serial.println(statusGarageClose0);
+      printSerial("change garage ");
+      printSerialInt(index + 1);
+      printSerial(" status: ");
+      printSerialInt(statusGarageOpen0);
+      printSerial(" - ");
+      printSerialInt(statusGarageClose0);
+      printSerialln();
 
       statusGarageOpen = statusGarageOpen0;
       statusGarageClose = statusGarageClose0;
@@ -280,9 +385,9 @@ void statusGarage(int index, int statusGarageOpenPin, int statusGarageClosePin, 
       sprintf(buf2, "Garage/Garage%d", index + 1);
       sprintf(buf1, statusGarageOpen == 0 ? statusGarageClose == 0 ? "Open and Closed" : "Open" : statusGarageClose == 0 ? "Closed" : "In between");
 
-      Serial.print(buf2);
-      Serial.print(": ");
-      Serial.println(buf1);
+      printSerial(buf2);
+      printSerial(": ");
+      printSerialln(buf1);
       client.publish(buf2, buf1, true);  
     }
   }
@@ -310,19 +415,25 @@ bool checkCode(char* payload)
 void callback(char* topic, byte* payload, unsigned int length)
 {
   char buf[sizeof(code) + 1];
+  char str[2] = " ";
 
-  Serial.print("Message arrived [");
-  Serial.print(topic);
-  Serial.print("] ");
+  printSerial("Message arrived [");
+  printSerial(topic);
+  printSerial("] ");
   memset(buf, 'x', sizeof(buf) - 1);
-  for (int i=0;i<length;i++) {
+  for (int i = 0; i < length; i++)
+  {
     if (i < sizeof(code))      
       buf[i] = (char)payload[i];
-    Serial.print((char)payload[i]);
+    str[0] = (char)payload[i];
+    printSerial(str);
   }  
   buf[min(sizeof(buf) - 1, length)] = 0;
 
-  Serial.println();
+  printSerialln();
+  printSerial("length: ");
+  printSerialInt(length);
+  printSerialln();
 
   if (nFailedCodes >= maxRetries)
   {
@@ -344,8 +455,9 @@ void callback(char* topic, byte* payload, unsigned int length)
     }
   }
 
-  Serial.print("nFailedCodes: ");
-  Serial.println(nFailedCodes);
+  printSerial("nFailedCodes: ");
+  printSerialInt(nFailedCodes);
+  printSerialln();
 
   if (nFailedCodes == 0)
   {
@@ -372,12 +484,21 @@ void callback(char* topic, byte* payload, unsigned int length)
 
 void setup()
 {
-    SetupReset();
-  
+  SetupReset();
+    
+# if defined ESP32_WROOM_32
+    Serial.begin(115200);
+# else    
     Serial.begin(9600);
+# endif
+
+#if defined SERIALBT
+    SerialBT.begin("GarageDoorController"); //Bluetooth device name
+#endif
+
     delay(100);
 
-    Serial.println("Setup");
+    printSerialln("Setup");
 
     for (int index = 0; index < nGarages; index++)
     {
@@ -390,39 +511,95 @@ void setup()
         pinMode(garageData[index].statusGaragePin, OUTPUT);
     }
 
+#if defined WIFI
+
+  delay(10);
+
+  printSerialln();
+  printSerial("Connecting to ");
+  printSerialln((char*)ssid);
+
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+      delay(500);
+      printSerial(".");
+  }
+
+  printSerialln();
+  printSerialln("WiFi connected");
+
+  IPAddress ip = WiFi.localIP();
+
+  char sip[16];
+  sprintf(sip, "%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
+
+  printSerial("IP address: ");
+  printSerialln(sip);
+/*
+  byte mac[6];
+  WiFi.macAddress(mac);
+  printSerial("MAC address: ");
+  printSerial(mac[0],HEX);
+  printSerial(":");
+  printSerial(mac[1],HEX);
+  printSerial(":");
+  printSerial(mac[2],HEX);
+  printSerial(":");
+  printSerial(mac[3],HEX);
+  printSerial(":");
+  printSerial(mac[4],HEX);
+  printSerial(":");
+  printSerialln(mac[5],HEX);
+*/  
+#else
+
     // dht.begin();
-    Serial.println("Initialize Ethernet ...");
+    printSerialln("Initialize Ethernet ...");
     Ethernet.init(10); // ok
     //Ethernet.init(5);
-    Serial.println("Initialize Ethernet done");
+    printSerialln("Initialize Ethernet done");
     
 #if defined DHCP
   // start the Ethernet connection:
-  Serial.println("Initialize Ethernet with DHCP:");
+  printSerialln("Initialize Ethernet with DHCP:");
   if (Ethernet.begin(mac) == 0) {
-    Serial.println("Failed to configure Ethernet using DHCP");
+    printSerialln("Failed to configure Ethernet using DHCP");
     // Check for Ethernet hardware present
     if (Ethernet.hardwareStatus() == EthernetNoHardware) {
-      Serial.println("Ethernet shield was not found.  Sorry, can't run without hardware. :(");
+      printSerialln("Ethernet shield was not found.  Sorry, can't run without hardware. :(");
       while (true) {
         delay(1); // do nothing, no point running without Ethernet hardware
       }
     }
     if (Ethernet.linkStatus() == LinkOFF) {
-      Serial.println("Ethernet cable is not connected.");
+      printSerialln("Ethernet cable is not connected.");
     }
     // try to configure using IP address instead of DHCP:
     Ethernet.begin(mac, ip, myDns);
-    Serial.print("My IP address: ");
-    Serial.println(Ethernet.localIP());
+    printSerial("My IP address: ");
+
+    IPAddress ip = Ethernet.localIP();
+
+    char sip[16];
+    sprintf(sip, "%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
+  
+    printSerialln(sip);
   } else {
-    Serial.print("  DHCP assigned IP ");
-    Serial.println(Ethernet.localIP());
+    printSerial("  DHCP assigned IP ");
+    IPAddress ip = Ethernet.localIP();
+
+    char sip[16];
+    sprintf(sip, "%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
+  
+    printSerialln(sip);
   }
 #else
     Ethernet.begin(mac, ip);
 #endif
   
+#endif
+
   // give the Ethernet shield a second to initialize:
   delay(1000);
     
@@ -436,6 +613,8 @@ void setup()
   nFailedCodes = 0;
 }
 
+unsigned long counter=0;
+
 void loop()
 {
     if (!client.connected())
@@ -447,12 +626,16 @@ void loop()
 
     if (millis() - mytime > updateInterval)
     {
-        if (started)
-        {
-          started = false;
-          message("Started");
-        }
-        mytime = millis();
+      printSerial("Alive");
+      printSerialInt(++counter);
+      printSerialln();
+
+      if (started)
+      {
+        started = false;
+        message("Started");
+      }
+      mytime = millis();
     }
 
     clearMessageWhenNeeded();
