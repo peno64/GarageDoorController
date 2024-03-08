@@ -29,10 +29,8 @@ BluetoothSerial SerialBT;
 #include <PubSubClient.h>
 
 #if defined WIFI
-#include <WiFi.h>
 
-const char* ssid = "peno2 2.4 GHz";
-const char* password = "QueeQueg";
+#include <WiFi.h>
 
 #elif defined(__AVR_ATmega328P__) || defined(__AVR_ATmega328__)
 // Nano
@@ -71,6 +69,10 @@ mqtt:
       unique_id: "GarageIP"
       state_topic: "Garage/IP"
 
+    - name: "GarageUpTime"
+      unique_id: "GarageUpTime"
+      state_topic: "Garage/UpTime"
+
     - name: "GarageMessage"
       unique_id: "GarageMessage"
       state_topic: "Garage/Message"
@@ -107,6 +109,11 @@ switch:
             topic: "GarageCmd/Switch2"
             payload: "{{ states('input_text.garagecode_input') }}"
 
+recorder:
+  exclude:
+    entities:
+      - sensor.garageuptime
+
 automations.yaml:
 
 - id: '5154208397015'
@@ -125,20 +132,17 @@ automations.yaml:
 
 
 */
-//#define DHCP
 
 unsigned long mytime = 0;
 const char *mqtt_server = "192.168.1.121";         // => Localhost, MOSQUITTO on own PC
-const char *mqttUser = "";                          // => I have no password and id !!!
-const char *mqttPassword = "";
-
-const int updateInterval = 1000; // Interval in milliseconds
 
 #if defined WIFI
 
 WiFiClient espClient;
 
 #else
+
+//#define DHCP
 
 EthernetClient espClient;
 
@@ -152,7 +156,7 @@ IPAddress myDns(192, 168, 1, 1);
 
 PubSubClient client(espClient);
 
-const unsigned long debounceTime = 100;
+const unsigned long debounceTime = 500;
 
 struct garageData
 {
@@ -168,7 +172,7 @@ struct garageData
 struct garageData garageData[] = 
 {
 #if defined ESP32_WROOM_32
-  { 25, 18, 21, 0, 2, 2, debounceTime * 2, }, // Garage 1
+  { 25, 18, /* 21 */ /* 23 */ /* 14 */ 17, 0, 2, 2, debounceTime * 2, }, // Garage 1
   { 26, 19, 22, 0, 2, 2, debounceTime * 2, }, // Garage 2
   // any number of garages can be added
 #else
@@ -196,6 +200,11 @@ unsigned long prevFail = 0;
 
 #define clearMessageTimeout 60000
 unsigned long messageTime = 0;
+
+unsigned int uptimeDays = 0;
+unsigned char uptimeHours = 0;
+unsigned char uptimeMinutes = 0;
+unsigned char uptimeSeconds = 0;
 
 void printSerial(char *data)
 {
@@ -266,7 +275,12 @@ void DoReset()
 #else
 
 #define SetupReset()
-#define DoReset resetFunc
+
+#if defined ESP32
+#define DoReset() ESP.restart()
+#else
+#define DoReset() resetFunc()
+#endif
 
 #endif
 
@@ -367,6 +381,10 @@ void statusGarage(int index, int statusGarageOpenPin, int statusGarageClosePin, 
       printSerialInt(statusGarageOpen0);
       printSerial(" - ");
       printSerialInt(statusGarageClose0);
+      printSerial(" - statusGarageOpenPin: ");
+      printSerialInt(statusGarageOpenPin);
+      printSerial(" - statusGarageClosePin: ");
+      printSerialInt(statusGarageClosePin);
       printSerialln();
 
       statusGarageOpen = statusGarageOpen0;
@@ -400,7 +418,7 @@ void statusGarages()
     unsigned long debounceGarage = garageData[index].debounceGarage;
     int statusGarageOpen = garageData[index].statusGarageOpen;
     int statusGarageClose = garageData[index].statusGarageClose;
-    statusGarage(index, garageData[index].statusGarageOpenPin, garageData[index].statusGarageClosePin, garageData[index].statusGaragePin, debounceGarage, statusGarageOpen, statusGarageClose);
+    statusGarage(index, garageData[index].statusGarageOpenPin, garageData[index].statusGarageClosePin, garageData[index].statusGaragePin, garageData[index].debounceGarage, statusGarageOpen, statusGarageClose);
     garageData[index].statusGarageOpen = statusGarageOpen;
     garageData[index].statusGarageClose = statusGarageClose;
     garageData[index].debounceGarage = debounceGarage;
@@ -503,6 +521,7 @@ void setup()
     for (int index = 0; index < nGarages; index++)
     {
       pinMode(garageData[index].switchGaragePin, OUTPUT);
+
       if (garageData[index].statusGarageOpenPin != 0)
         pinMode(garageData[index].statusGarageOpenPin, INPUT_PULLUP); 
       if (garageData[index].statusGarageClosePin != 0)
@@ -521,9 +540,15 @@ void setup()
 
   WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, password);
+  
+  unsigned long t1 = millis();
   while (WiFi.status() != WL_CONNECTED) {
+      unsigned long t2 = millis();
+      if (t2 - t1 > 1 * 60 * 1000) // try 10 minutes
+        DoReset();
+
       delay(500);
-      printSerial(".");
+      printSerial(".");      
   }
 
   printSerialln();
@@ -531,27 +556,19 @@ void setup()
 
   IPAddress ip = WiFi.localIP();
 
-  char sip[16];
-  sprintf(sip, "%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
+  char buf[50];
+  sprintf(buf, "IP address: %d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
 
-  printSerial("IP address: ");
-  printSerialln(sip);
-/*
+  printSerialln(buf);
+
   byte mac[6];
   WiFi.macAddress(mac);
-  printSerial("MAC address: ");
-  printSerial(mac[0],HEX);
-  printSerial(":");
-  printSerial(mac[1],HEX);
-  printSerial(":");
-  printSerial(mac[2],HEX);
-  printSerial(":");
-  printSerial(mac[3],HEX);
-  printSerial(":");
-  printSerial(mac[4],HEX);
-  printSerial(":");
-  printSerialln(mac[5],HEX);
-*/  
+  sprintf(buf, "MAC address: %02x:%02x:%02x:%02x:%02x:%02x", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+  printSerialln(buf);
+
+  sprintf(buf, "RRSI: %d", (int)WiFi.RSSI());
+  printSerialln(buf);
+
 #else
 
     // dht.begin();
@@ -613,8 +630,6 @@ void setup()
   nFailedCodes = 0;
 }
 
-unsigned long counter=0;
-
 void loop()
 {
     if (!client.connected())
@@ -624,18 +639,38 @@ void loop()
 
     client.loop();
 
-    if (millis() - mytime > updateInterval)
+    if (millis() - mytime > 1000) // every second
     {
-      printSerial("Alive");
-      printSerialInt(++counter);
-      printSerialln();
+      mytime = millis();
 
       if (started)
       {
         started = false;
         message("Started");
+
+        uptimeDays = uptimeHours = uptimeMinutes = uptimeSeconds = 0;
+      }      
+
+      if (++uptimeSeconds == 60)
+      {
+        uptimeSeconds = 0;
+        if (++uptimeMinutes == 60)
+        {
+          uptimeMinutes = 0;
+          if (++uptimeHours == 24)
+          {
+            uptimeHours = 0;
+            uptimeDays++;
+          }
+        }
       }
-      mytime = millis();
+
+      char buf[50];
+
+      sprintf(buf, "%u:%02d:%02d:%02d", uptimeDays, (int)uptimeHours, (int)uptimeMinutes, (int)uptimeSeconds);
+      printSerial("Uptime: ");
+      printSerialln(buf);
+      client.publish("Garage/UpTime", buf, true);
     }
 
     clearMessageWhenNeeded();
