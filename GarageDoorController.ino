@@ -7,6 +7,11 @@
 // See also for future reference: https://www.instructables.com/DIY-Smart-Garage-Door-Opener-Using-ESP8266-Wemos-D/
 //  This uses https://www.home-assistant.io/integrations/cover.mqtt/
 
+
+#include "secret.h"
+
+#define myName "GarageDoorController"
+
 #define SERIALBT
 
 #if defined SERIALBT
@@ -21,6 +26,7 @@ BluetoothSerial SerialBT;
 #endif
 
 #define ESP32_WROOM_32
+#define OTA
 
 #if defined ESP32_WROOM_32
 #define WIFI
@@ -31,6 +37,109 @@ BluetoothSerial SerialBT;
 #if defined WIFI
 
 #include <WiFi.h>
+
+#if defined OTA
+
+#include <WiFiClient.h>
+#include <WebServer.h>
+#include <ESPmDNS.h>
+#include <Update.h>
+
+
+WebServer server(80);
+
+/*
+ * Login page
+ */
+
+const char *loginIndex =
+ "<form name='loginForm'>"
+    "<table width='20%' bgcolor='A09F9F' align='center'>"
+        "<tr>"
+            "<td colspan=2>"
+                "<center><font size=4><b>" myName " Login Page</b></font></center>"
+                "<br>"
+            "</td>"
+            "<br>"
+            "<br>"
+        "</tr>"
+        "<tr>"
+             "<td>Username:</td>"
+             "<td><input type='text' size=25 name='userid'><br></td>"
+        "</tr>"
+        "<br>"
+        "<br>"
+        "<tr>"
+            "<td>Password:</td>"
+            "<td><input type='Password' size=25 name='pwd'><br></td>"
+            "<br>"
+            "<br>"
+        "</tr>"
+        "<tr>"
+            "<td><input type='submit' onclick='check(this.form)' value='Login'></td>"
+        "</tr>"
+    "</table>"
+"</form>"
+"<script>"
+    "function check(form)"
+    "{"
+    "if(form.userid.value=='"
+    OTAUSER
+    "' && form.pwd.value=='"
+    OTAPASSWORD
+    "')"
+    "{"
+    "window.open('/" OTAUPLOADPAGE "')"
+    "}"
+    "else"
+    "{"
+    " alert('Error Password or Username')"
+    "}"
+    "}"
+"</script>";
+
+/*
+ * Server Index Page
+ */
+
+const char *uploadPage =
+"<script src='https://ajax.googleapis.com/ajax/libs/jquery/3.2.1/jquery.min.js'></script>"
+"<form method='POST' action='#' enctype='multipart/form-data' id='upload_form'>"
+   "<input type='file' name='update'>"
+        "<input type='submit' value='Update'>"
+    "</form>"
+ "<div id='prg'>progress: 0%</div>"
+ "<script>"
+  "$('form').submit(function(e){"
+  "e.preventDefault();"
+  "var form = $('#upload_form')[0];"
+  "var data = new FormData(form);"
+  " $.ajax({"
+  "url: '/update',"
+  "type: 'POST',"
+  "data: data,"
+  "contentType: false,"
+  "processData:false,"
+  "xhr: function() {"
+  "var xhr = new window.XMLHttpRequest();"
+  "xhr.upload.addEventListener('progress', function(evt) {"
+  "if (evt.lengthComputable) {"
+  "var per = evt.loaded / evt.total;"
+  "$('#prg').html('progress: ' + Math.round(per*100) + '%');"
+  "}"
+  "}, false);"
+  "return xhr;"
+  "},"
+  "success:function(d, s) {"
+  "console.log('success!')"
+ "},"
+ "error: function (a, b, c) {"
+ "}"
+ "});"
+ "});"
+ "</script>";
+
+#endif
 
 #elif defined(__AVR_ATmega328P__) || defined(__AVR_ATmega328__)
 // Nano
@@ -189,10 +298,6 @@ struct garageData garageData[] =
 bool reset = true;
 bool started = true;
 
-#include "secret.h" // contains #define CODE "your secret code"
-
-const char code[] = CODE;
-
 #define maxRetries 3
 
 int nFailedCodes = 0;
@@ -312,7 +417,7 @@ void reconnect()
         printSerialInt(++count);
         printSerial(") ...");
         // Attempt to connect
-        if (client.connect("ArduinoGarage", mqttUser, mqttPassword, "Garage/Message", 1, true, "Offline"))
+        if (client.connect(myName, mqttUser, mqttPassword, "Garage/Message", 1, true, "Offline"))
         {
           IPAddress ip;
 #         if defined WIFI          
@@ -427,12 +532,12 @@ void statusGarages()
 
 bool checkCode(char* payload)
 {
-  return (strlen(payload) == strlen(code)) && (strcmp(payload, code) == 0);
+  return (strlen(payload) == (sizeof(GARAGEDOORCODE) - 1)) && (strcmp(payload, GARAGEDOORCODE) == 0);
 }
 
 void callback(char* topic, byte* payload, unsigned int length)
 {
-  char buf[sizeof(code) + 1];
+  char buf[sizeof(GARAGEDOORCODE) + 1];
   char str[2] = " ";
 
   printSerial("Message arrived [");
@@ -441,7 +546,7 @@ void callback(char* topic, byte* payload, unsigned int length)
   memset(buf, 'x', sizeof(buf) - 1);
   for (int i = 0; i < length; i++)
   {
-    if (i < sizeof(code))      
+    if (i < sizeof(GARAGEDOORCODE) - 1)
       buf[i] = (char)payload[i];
     str[0] = (char)payload[i];
     printSerial(str);
@@ -500,6 +605,60 @@ void callback(char* topic, byte* payload, unsigned int length)
   }
 }
 
+#if defined OTA
+
+const char *host = myName;
+
+void setupOTA()
+{
+
+  /*use mdns for host name resolution*/
+  if (!MDNS.begin(host)) { //http://esp32.local
+    Serial.println("Error setting up MDNS responder!");
+    while (1) {
+      delay(1000);
+    }
+  }
+  Serial.println("mDNS responder started");
+  /*return index page which is stored in OTAUPLOADPAGE */
+  server.on("/", HTTP_GET, []() {
+    server.sendHeader("Connection", "close");
+    server.send(200, "text/html", loginIndex);
+  });
+  server.on("/" OTAUPLOADPAGE, HTTP_GET, []() {
+    server.sendHeader("Connection", "close");
+    server.send(200, "text/html", uploadPage);
+  });
+  /*handling uploading firmware file */
+  server.on("/update", HTTP_POST, []() {
+    server.sendHeader("Connection", "close");
+    server.send(200, "text/plain", (Update.hasError()) ? "FAIL" : "OK");
+    ESP.restart();
+  }, []() {
+    HTTPUpload& upload = server.upload();
+    if (upload.status == UPLOAD_FILE_START) {
+      Serial.printf("Update: %s\n", upload.filename.c_str());
+      if (!Update.begin(UPDATE_SIZE_UNKNOWN)) { //start with max available size
+        Update.printError(Serial);
+      }
+    } else if (upload.status == UPLOAD_FILE_WRITE) {
+      /* flashing firmware to ESP*/
+      if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
+        Update.printError(Serial);
+      }
+    } else if (upload.status == UPLOAD_FILE_END) {
+      if (Update.end(true)) { //true to set the size to the current progress
+        Serial.printf("Update Success: %u\nRebooting...\n", upload.totalSize);
+      } else {
+        Update.printError(Serial);
+      }
+    }
+  });
+  server.begin();  
+}
+
+#endif
+
 void setup()
 {
   SetupReset();
@@ -511,7 +670,7 @@ void setup()
 # endif
 
 #if defined SERIALBT
-    SerialBT.begin("GarageDoorController"); //Bluetooth device name
+    SerialBT.begin(myName); //Bluetooth device name
 #endif
 
     delay(100);
@@ -623,6 +782,8 @@ void setup()
   client.setServer(mqtt_server, 1883);
   client.setCallback(callback);
 
+  setupOTA();
+
   mytime = millis();
 
   reset = true;
@@ -638,6 +799,10 @@ void loop()
       statusGarages();
 
     client.loop();
+
+#if defined OTA
+    server.handleClient();
+#endif
 
     if (millis() - mytime > 1000) // every second
     {
