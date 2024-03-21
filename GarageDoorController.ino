@@ -10,7 +10,11 @@
 
 #include "secret.h"
 
-#define myName "GarageDoorController"
+#define postfix ""
+
+#define myName "GarageDoorController" postfix
+#define MQTTid "Garage" postfix
+#define MQTTcmd MQTTid "Cmd"
 
 #define SERIALBT
 
@@ -25,11 +29,11 @@
 BluetoothSerial SerialBT;
 #endif
 
-#define ESP32_WROOM_32
-#define OTA
+#define ESP32_DEVKIT_V1
 
-#if defined ESP32_WROOM_32
+#if defined ESP32_DEVKIT_V1
 #define WIFI
+#define OTA
 #endif
 
 #include <PubSubClient.h>
@@ -186,7 +190,7 @@ struct garageData
 
 struct garageData garageData[] = 
 {
-#if defined ESP32_WROOM_32
+#if defined ESP32_DEVKIT_V1
   { 25, 18, /* 21 */ /* 23 */ /* 14 */ 17, 0, 2, 2, debounceTime * 2, }, // Garage 1
   { 26, 19, 22, 0, 2, 2, debounceTime * 2, }, // Garage 2
   // any number of garages can be added
@@ -306,7 +310,7 @@ void clearMessageWhenNeeded()
 
 void message(char *msg)
 {
-  client.publish("Garage/Message", msg, true);
+  client.publish(MQTTid "/Message", msg, true);
   messageTime = millis();
   if (messageTime == 0)
     messageTime = 1;
@@ -323,7 +327,7 @@ void reconnect()
         printSerialInt(++count);
         printSerial(") ...");
         // Attempt to connect
-        if (client.connect(myName, mqttUser, mqttPassword, "Garage/Message", 1, true, "Offline"))
+        if (client.connect(myName, mqttUser, mqttPassword, MQTTid "/Message", 1, true, "Offline"))
         {
           IPAddress ip;
 #         if defined WIFI          
@@ -333,7 +337,7 @@ void reconnect()
 #         endif
           char sip[16];
           sprintf(sip, "%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
-          client.publish("Garage/IP", sip, true);
+          client.publish(MQTTid "/IP", sip, true);
           if (reset)
           {
             reset = false;
@@ -343,7 +347,7 @@ void reconnect()
           else
             message("Reconnected");
           printSerialln("connected");
-          client.subscribe("GarageCmd/#");
+          client.subscribe(MQTTcmd "/#");
         }
         else
         {            
@@ -411,7 +415,7 @@ void statusGarage(int index, int statusGarageOpenPin, int statusGarageClosePin, 
 
       debounceGarage = millis();
 
-      sprintf(buf2, "Garage/Garage%d", index + 1);
+      sprintf(buf2, MQTTid "/Garage%d", index + 1);
       sprintf(buf1, statusGarageOpen == 0 ? statusGarageClose == 0 ? "Open and Closed" : "Open" : statusGarageClose == 0 ? "Closed" : "In between");
 
       printSerial(buf2);
@@ -494,7 +498,7 @@ void callback(char* topic, byte* payload, unsigned int length)
     {
       char buf[18];
 
-      sprintf(buf, "GarageCmd/Switch%d", index + 1);
+      sprintf(buf, MQTTcmd "/Switch%d", index + 1);
       if (strcmp(topic, buf) == 0)
       {
         message("");
@@ -605,7 +609,7 @@ void setup()
 {
   SetupReset();
     
-# if defined ESP32_WROOM_32
+# if defined ESP32_DEVKIT_V1
     Serial.begin(115200);
 # else    
     Serial.begin(9600);
@@ -777,7 +781,7 @@ void loop()
       sprintf(buf, "%u:%02d:%02d:%02d", uptimeDays, (int)uptimeHours, (int)uptimeMinutes, (int)uptimeSeconds);
       printSerial("Uptime: ");
       printSerialln(buf);
-      client.publish("Garage/UpTime", buf, true);
+      client.publish(MQTTid "/UpTime", buf, true);
     }
 
     clearMessageWhenNeeded();
