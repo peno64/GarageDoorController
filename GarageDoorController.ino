@@ -8,6 +8,22 @@
 //  This uses https://www.home-assistant.io/integrations/cover.mqtt/
 
 
+/*
+  Content of secret.h:
+
+#define WIFISSID "<your wifi ssid>"
+#define WIFIPASSWORD "<your wifi password>"
+
+#define MQTTUSER "<your mqtt user>"
+#define MQTTPASSWORD "<your mqtt password>"
+
+#define GARAGEDOORCODE "<your garagedoor code>"
+
+#define UPLOADUSER "<your upload user>"
+#define UPLOADPASSWORD "<your upload password>"
+
+*/
+
 #include "secret.h"
 
 #define postfix ""
@@ -188,7 +204,7 @@ struct garageData
   unsigned long debounceGarage; // debounce value
 };
 
-struct garageData garageData[] = 
+struct garageData garageData[] =
 {
 #if defined ESP32_DEVKIT_V1
   { 25, 18, /* 21 */ /* 23 */ /* 14 */ 17, 0, 2, 2, debounceTime * 2, }, // Garage 1
@@ -198,7 +214,7 @@ struct garageData garageData[] =
   { 3, 6, 8, 0, 2, 2, debounceTime * 2, }, // Garage 1
   { 4, 7, 9, 0, 2, 2, debounceTime * 2, }, // Garage 2
   // any number of garages can be added
-#endif  
+#endif
 };
 
 #define nGarages (sizeof(garageData) / sizeof(*garageData))
@@ -319,7 +335,7 @@ void message(char *msg)
 void reconnect()
 {
     int count = 0;
-    
+
     // Loop until we're reconnected
     while (!client.connected())
     {
@@ -327,10 +343,10 @@ void reconnect()
         printSerialInt(++count);
         printSerial(") ...");
         // Attempt to connect
-        if (client.connect(myName, mqttUser, mqttPassword, MQTTid "/Message", 1, true, "Offline"))
+        if (client.connect(myName, MQTTUSER, MQTTPASSWORD, MQTTid "/Message", 1, true, "Offline"))
         {
           IPAddress ip;
-#         if defined WIFI          
+#         if defined WIFI
             ip = WiFi.localIP();
 #         else
             ip = Ethernet.localIP();
@@ -350,7 +366,7 @@ void reconnect()
           client.subscribe(MQTTcmd "/#");
         }
         else
-        {            
+        {
             printSerial("failed, rc=");
             printSerialInt(client.state());
             if (count >= 10)
@@ -421,7 +437,7 @@ void statusGarage(int index, int statusGarageOpenPin, int statusGarageClosePin, 
       printSerial(buf2);
       printSerial(": ");
       printSerialln(buf1);
-      client.publish(buf2, buf1, true);  
+      client.publish(buf2, buf1, true);
     }
   }
 }
@@ -460,7 +476,7 @@ void callback(char* topic, byte* payload, unsigned int length)
       buf[i] = (char)payload[i];
     str[0] = (char)payload[i];
     printSerial(str);
-  }  
+  }
   buf[min(sizeof(buf) - 1, length)] = 0;
 
   printSerialln();
@@ -475,7 +491,7 @@ void callback(char* topic, byte* payload, unsigned int length)
     else
       message("Wait a minute...");
   }
-  
+
   if (nFailedCodes < maxRetries)
   {
     if (checkCode(buf))
@@ -517,7 +533,9 @@ void callback(char* topic, byte* payload, unsigned int length)
 
 #if defined OTA
 
-const char *uploadPage =
+#define UPDATEPAGE "/jsdlmkfjcnsdjkqcfjdlkckslcndsjfsdqfjksd" // a name that nobody can figure out
+
+const char *uploadContent =
 "<script src='https://ajax.googleapis.com/ajax/libs/jquery/3.2.1/jquery.min.js'></script>"
 "<form method='POST' action='#' enctype='multipart/form-data' id='upload_form'>"
    "<input type='file' name='update'>"
@@ -532,7 +550,7 @@ const char *uploadPage =
   "var form = $('#upload_form')[0];"
   "var data = new FormData(form);"
   " $.ajax({"
-  "url: '/update',"
+  "url: '" UPDATEPAGE "',"
   "type: 'POST',"
   "data: data,"
   "contentType: false,"
@@ -570,13 +588,21 @@ void setupOTA()
     }
   }
   Serial.println("mDNS responder started");
-
+  /*return upload page which is stored in uploadContent */
   server.on("/", HTTP_GET, []() {
+    // See https://github.com/espressif/arduino-esp32/blob/master/libraries/WebServer/examples/HttpBasicAuth/HttpBasicAuth.ino
+    if (!server.authenticate(UPLOADUSER, UPLOADPASSWORD)) {
+      return server.requestAuthentication();
+    }
     server.sendHeader("Connection", "close");
-    server.send(200, "text/html", uploadPage);
+    server.send(200, "text/html", uploadContent);
   });
   /*handling uploading firmware file */
-  server.on("/update", HTTP_POST, []() {
+  server.on(UPDATEPAGE, HTTP_POST, []() {
+    // See https://github.com/espressif/arduino-esp32/blob/master/libraries/WebServer/examples/HttpBasicAuth/HttpBasicAuth.ino
+    if (!server.authenticate(UPLOADUSER, UPLOADPASSWORD)) {
+      return server.requestAuthentication();
+    }
     server.sendHeader("Connection", "close");
     server.send(200, "text/plain", (Update.hasError()) ? "FAIL" : "OK");
     ESP.restart();
@@ -600,7 +626,8 @@ void setupOTA()
       }
     }
   });
-  server.begin();  
+
+  server.begin();
 }
 
 #endif
@@ -608,10 +635,10 @@ void setupOTA()
 void setup()
 {
   SetupReset();
-    
+
 # if defined ESP32_DEVKIT_V1
     Serial.begin(115200);
-# else    
+# else
     Serial.begin(9600);
 # endif
 
@@ -628,7 +655,7 @@ void setup()
       pinMode(garageData[index].switchGaragePin, OUTPUT);
 
       if (garageData[index].statusGarageOpenPin != 0)
-        pinMode(garageData[index].statusGarageOpenPin, INPUT_PULLUP); 
+        pinMode(garageData[index].statusGarageOpenPin, INPUT_PULLUP);
       if (garageData[index].statusGarageClosePin != 0)
         pinMode(garageData[index].statusGarageClosePin, INPUT_PULLUP);
       if (garageData[index].statusGaragePin != 0)
@@ -641,11 +668,11 @@ void setup()
 
   printSerialln();
   printSerial("Connecting to ");
-  printSerialln((char*)ssid);
+  printSerialln((char*)WIFISSID);
 
   WiFi.mode(WIFI_STA);
-  WiFi.begin(ssid, password);
-  
+  WiFi.begin(WIFISSID, WIFIPASSWORD);
+
   unsigned long t1 = millis();
   while (WiFi.status() != WL_CONNECTED) {
       unsigned long t2 = millis();
@@ -653,7 +680,7 @@ void setup()
         DoReset();
 
       delay(500);
-      printSerial(".");      
+      printSerial(".");
   }
 
   printSerialln();
@@ -681,7 +708,7 @@ void setup()
     Ethernet.init(10); // ok
     //Ethernet.init(5);
     printSerialln("Initialize Ethernet done");
-    
+
 #if defined DHCP
   // start the Ethernet connection:
   printSerialln("Initialize Ethernet with DHCP:");
@@ -705,7 +732,7 @@ void setup()
 
     char sip[16];
     sprintf(sip, "%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
-  
+
     printSerialln(sip);
   } else {
     printSerial("  DHCP assigned IP ");
@@ -713,18 +740,18 @@ void setup()
 
     char sip[16];
     sprintf(sip, "%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
-  
+
     printSerialln(sip);
   }
 #else
     Ethernet.begin(mac, ip);
 #endif
-  
+
 #endif
 
   // give the Ethernet shield a second to initialize:
   delay(1000);
-    
+
   client.setServer(mqtt_server, 1883);
   client.setCallback(callback);
 
@@ -760,7 +787,7 @@ void loop()
         message("Started");
 
         uptimeDays = uptimeHours = uptimeMinutes = uptimeSeconds = 0;
-      }      
+      }
 
       if (++uptimeSeconds == 60)
       {
