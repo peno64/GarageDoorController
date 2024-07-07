@@ -1,4 +1,4 @@
-// Works on both the Arduino Nano and Mega
+// Works on both the Arduino Nano and Mega and on esp32 (tested with WROOM32 Devkit V1)
 
 // See https://community.platformio.org/t/mqtt-with-arduino-nano-and-enc2860/34236/7
 // See https://pubsubclient.knolleary.net/
@@ -32,7 +32,11 @@
 #define MQTTid "Garage" postfix
 #define MQTTcmd MQTTid "Cmd"
 
-#define SERIALBT
+#define ESP32_DEVKIT_V1
+
+#if defined ESP32_DEVKIT_V1
+# define SERIALBT
+#endif
 
 #if defined SERIALBT
 
@@ -44,8 +48,6 @@
 
 BluetoothSerial SerialBT;
 #endif
-
-#define ESP32_DEVKIT_V1
 
 #if defined ESP32_DEVKIT_V1
 #define WIFI
@@ -65,7 +67,7 @@ BluetoothSerial SerialBT;
 #include <ESPmDNS.h>
 #include <Update.h>
 
-#endif
+#endif // OTA
 
 #elif defined(__AVR_ATmega328P__) || defined(__AVR_ATmega328__)
 // Nano
@@ -535,6 +537,14 @@ void callback(char* topic, byte* payload, unsigned int length)
 
 #define UPDATEPAGE "/jsdlmkfjcnsdjkqcfjdlkckslcndsjfsdqfjksd" // a name that nobody can figure out
 
+char *homeContent()
+{
+  return
+"<body>"
+myName
+"</body>";
+}
+
 const char *uploadContent =
 "<script src='https://ajax.googleapis.com/ajax/libs/jquery/3.2.1/jquery.min.js'></script>"
 "<form method='POST' action='#' enctype='multipart/form-data' id='upload_form'>"
@@ -582,14 +592,24 @@ void setupOTA()
 {
   /*use mdns for host name resolution*/
   if (!MDNS.begin(host)) { //http://esp32.local
-    Serial.println("Error setting up MDNS responder!");
+    printSerialln("Error setting up MDNS responder!");
     while (1) {
       delay(1000);
     }
   }
-  Serial.println("mDNS responder started");
+  printSerialln("mDNS responder started");
+ /*return home */
+ server.on("/", HTTP_GET, []() {
+    // See https://github.com/espressif/arduino-esp32/blob/master/libraries/WebServer/examples/HttpBasicAuth/HttpBasicAuth.ino
+    if (!server.authenticate(UPLOADUSER, UPLOADPASSWORD)) {
+      return server.requestAuthentication();
+    }
+    server.sendHeader("Connection", "close");
+    server.send(200, "text/html", homeContent());
+  });
+
   /*return upload page which is stored in uploadContent */
-  server.on("/", HTTP_GET, []() {
+  server.on("/upload", HTTP_GET, []() {
     // See https://github.com/espressif/arduino-esp32/blob/master/libraries/WebServer/examples/HttpBasicAuth/HttpBasicAuth.ino
     if (!server.authenticate(UPLOADUSER, UPLOADPASSWORD)) {
       return server.requestAuthentication();
