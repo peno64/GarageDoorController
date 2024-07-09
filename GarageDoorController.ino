@@ -393,54 +393,53 @@ void statusGarage(int index, int statusGarageOpenPin, int statusGarageClosePin, 
   int statusGarageOpen0;
   int statusGarageClose0;
 
-  if (debounceGarage == 0 || millis() - debounceGarage > debounceTime)
-  {
+  if (statusGarageOpenPin != 0)
+    statusGarageOpen0 = digitalRead(statusGarageOpenPin);
+  else
+    statusGarageOpen0 = statusGarageOpen;
+  if (statusGarageClosePin != 0)
+    statusGarageClose0 = digitalRead(statusGarageClosePin);
+  else
+    statusGarageClose0 = statusGarageClose;
+
+  if (statusGarageOpen0 == statusGarageOpen && statusGarageClose0 == statusGarageClose)
     debounceGarage = 0;
+  else if (debounceGarage == 0)
+    debounceGarage = millis();
+  else if (millis() - debounceGarage > debounceTime)
+  {
+    printSerial("change garage ");
+    printSerialInt(index + 1);
+    printSerial(" status: ");
+    printSerialInt(statusGarageOpen0);
+    printSerial(" - ");
+    printSerialInt(statusGarageClose0);
+    printSerial(" - statusGarageOpenPin: ");
+    printSerialInt(statusGarageOpenPin);
+    printSerial(" - statusGarageClosePin: ");
+    printSerialInt(statusGarageClosePin);
+    printSerialln();
 
-    if (statusGarageOpenPin != 0)
-      statusGarageOpen0 = digitalRead(statusGarageOpenPin);
-    else
-      statusGarageOpen0 = statusGarageOpen;
-    if (statusGarageClosePin != 0)
-      statusGarageClose0 = digitalRead(statusGarageClosePin);
-    else
-      statusGarageClose0 = statusGarageClose;
+    statusGarageOpen = statusGarageOpen0;
+    statusGarageClose = statusGarageClose0;
 
-    if (statusGarageOpen0 != statusGarageOpen || statusGarageClose0 != statusGarageClose)
-    {
-      printSerial("change garage ");
-      printSerialInt(index + 1);
-      printSerial(" status: ");
-      printSerialInt(statusGarageOpen0);
-      printSerial(" - ");
-      printSerialInt(statusGarageClose0);
-      printSerial(" - statusGarageOpenPin: ");
-      printSerialInt(statusGarageOpenPin);
-      printSerial(" - statusGarageClosePin: ");
-      printSerialInt(statusGarageClosePin);
-      printSerialln();
+    if (statusGarageOpenPin == 0)
+      statusGarageOpen = !statusGarageClose;
+    if (statusGarageClosePin == 0)
+      statusGarageClose = !statusGarageOpen;
 
-      statusGarageOpen = statusGarageOpen0;
-      statusGarageClose = statusGarageClose0;
+    if (statusGaragePin != 0)
+      digitalWrite(statusGaragePin, statusGarageOpen0);    
 
-      if (statusGarageOpenPin == 0)
-        statusGarageOpen = !statusGarageClose;
-      if (statusGarageClosePin == 0)
-        statusGarageClose = !statusGarageOpen;
+    sprintf(buf2, MQTTid "/Garage%d", index + 1);
+    sprintf(buf1, statusGarageOpen == 0 ? statusGarageClose == 0 ? "Open and Closed" : "Open" : statusGarageClose == 0 ? "Closed" : "In between");
 
-      if (statusGaragePin != 0)
-        digitalWrite(statusGaragePin, statusGarageOpen0);
+    printSerial(buf2);
+    printSerial(": ");
+    printSerialln(buf1);
+    client.publish(buf2, buf1, true);
 
-      debounceGarage = millis();
-
-      sprintf(buf2, MQTTid "/Garage%d", index + 1);
-      sprintf(buf1, statusGarageOpen == 0 ? statusGarageClose == 0 ? "Open and Closed" : "Open" : statusGarageClose == 0 ? "Closed" : "In between");
-
-      printSerial(buf2);
-      printSerial(": ");
-      printSerialln(buf1);
-      client.publish(buf2, buf1, true);
-    }
+    debounceGarage = 0;
   }
 }
 
@@ -451,10 +450,10 @@ void statusGarages()
     unsigned long debounceGarage = garageData[index].debounceGarage;
     int statusGarageOpen = garageData[index].statusGarageOpen;
     int statusGarageClose = garageData[index].statusGarageClose;
-    statusGarage(index, garageData[index].statusGarageOpenPin, garageData[index].statusGarageClosePin, garageData[index].statusGaragePin, garageData[index].debounceGarage, statusGarageOpen, statusGarageClose);
-    garageData[index].statusGarageOpen = statusGarageOpen;
-    garageData[index].statusGarageClose = statusGarageClose;
+    statusGarage(index, garageData[index].statusGarageOpenPin, garageData[index].statusGarageClosePin, garageData[index].statusGaragePin, debounceGarage, statusGarageOpen, statusGarageClose);
     garageData[index].debounceGarage = debounceGarage;
+    garageData[index].statusGarageOpen = statusGarageOpen;
+    garageData[index].statusGarageClose = statusGarageClose;    
   }
 }
 
