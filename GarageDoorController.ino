@@ -29,6 +29,9 @@
 #define postfix ""
 
 #define myName "GarageDoorController" postfix
+
+#define VERSIONSTRING " 09/07/2024. Copyright peno"
+
 #define MQTTid "Garage" postfix
 #define MQTTcmd MQTTid "Cmd"
 
@@ -540,13 +543,16 @@ char *homeContent()
 {
   return
 "<body>"
-myName
+myName " - current version " VERSIONSTRING
 "</body>";
 }
 
 const char *uploadContent =
 "<script src='https://ajax.googleapis.com/ajax/libs/jquery/3.2.1/jquery.min.js'></script>"
 "<form method='POST' action='#' enctype='multipart/form-data' id='upload_form'>"
+   "Update firmware " myName " (current version " VERSIONSTRING ")"
+   "<br>"
+   "<br>"
    "<input type='file' name='update'>"
    "<br>"
    "<br>"
