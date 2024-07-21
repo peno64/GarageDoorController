@@ -30,7 +30,7 @@
 
 #define myName "GarageDoorController" postfix
 
-#define VERSIONSTRING " 09/07/2024. Copyright peno"
+#define VERSIONSTRING " 21/07/2024. Copyright peno"
 
 #define MQTTid "Garage" postfix
 #define MQTTcmd MQTTid "Cmd"
@@ -196,7 +196,7 @@ IPAddress myDns(192, 168, 1, 1);
 
 PubSubClient client(espClient);
 
-const unsigned long debounceTime = 500;
+const unsigned long debounceTime = /* 500 */ 0;
 
 struct garageData
 {
@@ -212,12 +212,12 @@ struct garageData
 struct garageData garageData[] =
 {
 #if defined ESP32_DEVKIT_V1
-  { 25, 18, /* 21 */ /* 23 */ /* 14 */ 17, 0, 2, 2, debounceTime * 2, }, // Garage 1
-  { 26, 19, 22, 0, 2, 2, debounceTime * 2, }, // Garage 2
+  { 25, 18, /* 21 */ /* 23 */ /* 14 */ 17, 0, 2, 2, 0, }, // Garage 1
+  { 26, /* 19 */ 16, 22, 0, 2, 2, 0, }, // Garage 2
   // any number of garages can be added
 #else
-  { 3, 6, 8, 0, 2, 2, debounceTime * 2, }, // Garage 1
-  { 4, 7, 9, 0, 2, 2, debounceTime * 2, }, // Garage 2
+  { 3, 6, 8, 0, 2, 2, 0, }, // Garage 1
+  { 4, 7, 9, 0, 2, 2, 0, }, // Garage 2
   // any number of garages can be added
 #endif
 };
@@ -407,10 +407,12 @@ void statusGarage(int index, int statusGarageOpenPin, int statusGarageClosePin, 
 
   if (statusGarageOpen0 == statusGarageOpen && statusGarageClose0 == statusGarageClose)
     debounceGarage = 0;
-  else if (debounceGarage == 0)
+  else if (debounceTime != 0 && debounceGarage == 0)
     debounceGarage = millis();
-  else if (millis() - debounceGarage > debounceTime)
+  else if ((debounceTime == 0) || (millis() - debounceGarage > debounceTime))
   {
+    debounceGarage = 0;
+
     printSerial("change garage ");
     printSerialInt(index + 1);
     printSerial(" status: ");
@@ -437,12 +439,14 @@ void statusGarage(int index, int statusGarageOpenPin, int statusGarageClosePin, 
     sprintf(buf2, MQTTid "/Garage%d", index + 1);
     sprintf(buf1, statusGarageOpen == 0 ? statusGarageClose == 0 ? "Open and Closed" : "Open" : statusGarageClose == 0 ? "Closed" : "In between");
 
+    if ((statusGarageOpen == 0 && statusGarageClose != 0) ||
+        (statusGarageOpen != 0 && statusGarageClose == 0))
+      message("");
+
     printSerial(buf2);
     printSerial(": ");
     printSerialln(buf1);
     client.publish(buf2, buf1, true);
-
-    debounceGarage = 0;
   }
 }
 
