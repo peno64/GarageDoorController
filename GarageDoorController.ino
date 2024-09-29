@@ -174,7 +174,8 @@ automations.yaml:
 */
 
 unsigned long mytime = 0;
-const char *mqtt_server = "192.168.1.121";         // => Localhost, MOSQUITTO on own PC
+//const char *mqtt_server = "192.168.1.121";         // => Localhost, MOSQUITTO on own PC
+const char *mqtt_server = "MQTTBROKER";         // => Localhost, MOSQUITTO on own PC
 
 #if defined WIFI
 
