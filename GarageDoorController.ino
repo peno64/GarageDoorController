@@ -30,7 +30,7 @@
 
 #define myName "GarageDoorController" postfix
 
-#define VERSIONSTRING " 21/07/2024. Copyright peno"
+#define VERSIONSTRING "Copyright peno " __DATE__ " " __TIME__
 
 #define MQTTid "Garage" postfix
 #define MQTTcmd MQTTid "Cmd"
