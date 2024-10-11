@@ -14,6 +14,8 @@
 #define WIFISSID "<your wifi ssid>"
 #define WIFIPASSWORD "<your wifi password>"
 
+#define MQTTHOST "<your mqtt ip or name>"
+
 #define MQTTUSER "<your mqtt user>"
 #define MQTTPASSWORD "<your mqtt password>"
 
@@ -174,8 +176,6 @@ automations.yaml:
 */
 
 unsigned long mytime = 0;
-//const char *mqtt_server = "192.168.1.121";         // => Localhost, MOSQUITTO on own PC
-const char *mqtt_server = "MQTTBROKER";         // => Localhost, MOSQUITTO on own PC
 
 #if defined WIFI
 
@@ -332,7 +332,8 @@ void clearMessageWhenNeeded()
 
 void message(char *msg)
 {
-  client.publish(MQTTid "/Message", msg, true);
+  if (client.connected())
+    client.publish(MQTTid "/Message", msg, true);
   messageTime = millis();
   if (messageTime == 0)
     messageTime = 1;
@@ -340,10 +341,12 @@ void message(char *msg)
 
 void reconnect()
 {
-    int count = 0;
+    static int count = 0;
+    static unsigned long msWait = 0;
 
     // Loop until we're reconnected
-    while (!client.connected())
+    if ((count == 0 || millis() - msWait > 5000) && 
+        (!client.connected()))
     {
         printSerial("Attempting MQTT connection (");
         printSerialInt(++count);
@@ -370,6 +373,7 @@ void reconnect()
             message("Reconnected");
           printSerialln("connected");
           client.subscribe(MQTTcmd "/#");
+          count = 0;
         }
         else
         {
@@ -379,16 +383,20 @@ void reconnect()
             {
               printSerialln(" Unable to connect, reset");
               delay(500);
+              count = 0;
               DoReset();
             }
             else
             {
               printSerialln(" try again in 5 seconds");
               // Wait 5 seconds before retrying
-              delay(5000);
+              msWait = millis();
             }
         }
     }
+    
+    if (count != 0 && client.connected())
+      count = 0;
 }
 
 void statusGarage(int index, int statusGarageOpenPin, int statusGarageClosePin, int statusGaragePin, unsigned long &debounceGarage, int &statusGarageOpen, int &statusGarageClose)
@@ -447,7 +455,8 @@ void statusGarage(int index, int statusGarageOpenPin, int statusGarageClosePin, 
     printSerial(buf2);
     printSerial(": ");
     printSerialln(buf1);
-    client.publish(buf2, buf1, true);
+    if (client.connected())
+      client.publish(buf2, buf1, true);
   }
 }
 
@@ -493,48 +502,51 @@ void callback(char* topic, byte* payload, unsigned int length)
   printSerialInt(length);
   printSerialln();
 
-  if (nFailedCodes >= maxRetries)
+  if (*buf)
   {
-    if (millis() - prevFail > 60000L)
-      nFailedCodes = 0;
-    else
-      message("Wait a minute...");
-  }
-
-  if (nFailedCodes < maxRetries)
-  {
-    if (checkCode(buf))
-      nFailedCodes = 0;
-    else
+    if (nFailedCodes >= maxRetries)
     {
-      message("Wrong code");
-      prevFail = millis();
-      nFailedCodes++;
+      if (millis() - prevFail > 60000L)
+        nFailedCodes = 0;
+      else
+        message("Wait a minute...");
     }
-  }
 
-  printSerial("nFailedCodes: ");
-  printSerialInt(nFailedCodes);
-  printSerialln();
-
-  if (nFailedCodes == 0)
-  {
-    for (int index = 0; index < nGarages; index++)
+    if (nFailedCodes < maxRetries)
     {
-      char buf[18];
-
-      sprintf(buf, MQTTcmd "/Switch%d", index + 1);
-      if (strcmp(topic, buf) == 0)
+      if (checkCode(buf))
+        nFailedCodes = 0;
+      else
       {
-        message("");
-        sprintf(buf, "Switch garage %d", index + 1);
-        message(buf);
+        message("Wrong code");
+        prevFail = millis();
+        nFailedCodes++;
+      }
+    }
 
-        //digitalWrite(switchGarage1Pin, !digitalRead(switchGarage1Pin));
-        digitalWrite(garageData[index].switchGaragePin, HIGH);
-        delay(500);
-        digitalWrite(garageData[index].switchGaragePin, LOW);
-        break;
+    printSerial("nFailedCodes: ");
+    printSerialInt(nFailedCodes);
+    printSerialln();
+
+    if (nFailedCodes == 0)
+    {
+      for (int index = 0; index < nGarages; index++)
+      {
+        char buf[18];
+
+        sprintf(buf, MQTTcmd "/Switch%d", index + 1);
+        if (strcmp(topic, buf) == 0)
+        {
+          message("");
+          sprintf(buf, "Switch garage %d", index + 1);
+          message(buf);
+
+          //digitalWrite(switchGarage1Pin, !digitalRead(switchGarage1Pin));
+          digitalWrite(garageData[index].switchGaragePin, HIGH);
+          delay(500);
+          digitalWrite(garageData[index].switchGaragePin, LOW);
+          break;
+        }
       }
     }
   }
@@ -782,7 +794,7 @@ void setup()
   // give the Ethernet shield a second to initialize:
   delay(1000);
 
-  client.setServer(mqtt_server, 1883);
+  client.setServer(MQTTHOST, 1883);
   client.setCallback(callback);
 
   setupOTA();
@@ -796,12 +808,12 @@ void setup()
 
 void loop()
 {
-    if (!client.connected())
-      reconnect();
-    else
+    reconnect();
+    if (client.connected())
+    {
       statusGarages();
-
-    client.loop();
+      client.loop();
+    }
 
 #if defined OTA
     server.handleClient();
@@ -838,7 +850,8 @@ void loop()
       sprintf(buf, "%u:%02d:%02d:%02d", uptimeDays, (int)uptimeHours, (int)uptimeMinutes, (int)uptimeSeconds);
       printSerial("Uptime: ");
       printSerialln(buf);
-      client.publish(MQTTid "/UpTime", buf, true);
+      if (client.connected())
+        client.publish(MQTTid "/UpTime", buf, true);
     }
 
     clearMessageWhenNeeded();
