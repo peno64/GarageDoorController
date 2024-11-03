@@ -43,6 +43,16 @@
 # define SERIALBT
 #endif
 
+#define LOGGING
+
+#if defined LOGGING
+#define maxNLogs 50
+#define maxLogSize 100
+int logsIndex = 0;
+int logOffset = 0;
+char logs[maxNLogs][maxLogSize];
+#endif
+
 #if defined SERIALBT
 
 #include "BluetoothSerial.h"
@@ -195,7 +205,7 @@ IPAddress myDns(192, 168, 1, 1);
 
 #endif
 
-PubSubClient client(espClient);
+PubSubClient mqttClient(espClient);
 
 const unsigned long debounceTime = /* 500 */ 0;
 
@@ -243,6 +253,15 @@ unsigned char uptimeHours = 0;
 unsigned char uptimeMinutes = 0;
 unsigned char uptimeSeconds = 0;
 
+#if defined LOGGING
+void KeepMessage(char *data)
+{
+  if (logOffset == 0)
+    logOffset += sprintf(logs[logsIndex], "%u:%02d:%02d:%02d: ", uptimeDays, (int)uptimeHours, (int)uptimeMinutes, (int)uptimeSeconds);
+  logOffset += snprintf(logs[logsIndex] + logOffset, maxLogSize - logOffset - 1, data);
+}
+#endif
+
 void printSerial(char *data)
 {
   int l = strlen(data);
@@ -255,6 +274,9 @@ void printSerial(char *data)
 # if defined SERIALBT
     SerialBT.print(data);
 # endif
+# if defined LOGGING
+    KeepMessage(data);
+# endif
 }
 
 void printSerialInt(int a)
@@ -265,6 +287,11 @@ void printSerialInt(int a)
 # endif
 # if defined SERIALBT
     SerialBT.print(a);
+# endif
+# if defined LOGGING
+    char data[10];
+    sprintf(data, "%d", a);
+    KeepMessage(data);
 # endif
 }
 
@@ -278,6 +305,11 @@ void printSerialln(char *data)
 # endif
 # if defined SERIALBT
     SerialBT.println();
+# endif
+# if defined LOGGING
+    if (++logsIndex >= maxNLogs)
+      logsIndex = 0;
+    logOffset = 0;
 # endif
 }
 
@@ -332,8 +364,8 @@ void clearMessageWhenNeeded()
 
 void message(char *msg)
 {
-  if (client.connected())
-    client.publish(MQTTid "/Message", msg, true);
+  if (mqttClient.connected())
+    mqttClient.publish(MQTTid "/Message", msg, true);
   messageTime = millis();
   if (messageTime == 0)
     messageTime = 1;
@@ -345,14 +377,14 @@ void reconnect()
     static unsigned long msWait = 0;
 
     // Loop until we're reconnected
-    if ((count == 0 || millis() - msWait > 5000) && 
-        (!client.connected()))
+    if ((count == 0 || millis() - msWait > 5000) &&
+        (!mqttClient.connected()))
     {
         printSerial("Attempting MQTT connection (");
         printSerialInt(++count);
         printSerial(") ...");
         // Attempt to connect
-        if (client.connect(myName, MQTTUSER, MQTTPASSWORD, MQTTid "/Message", 1, true, "Offline"))
+        if (mqttClient.connect(myName, MQTTUSER, MQTTPASSWORD, MQTTid "/Message", 1, true, "Offline"))
         {
           IPAddress ip;
 #         if defined WIFI
@@ -362,7 +394,7 @@ void reconnect()
 #         endif
           char sip[16];
           sprintf(sip, "%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
-          client.publish(MQTTid "/IP", sip, true);
+          mqttClient.publish(MQTTid "/IP", sip, true);
           if (reset)
           {
             reset = false;
@@ -372,13 +404,13 @@ void reconnect()
           else
             message("Reconnected");
           printSerialln("connected");
-          client.subscribe(MQTTcmd "/#");
+          mqttClient.subscribe(MQTTcmd "/#");
           count = 0;
         }
         else
         {
             printSerial("failed, rc=");
-            printSerialInt(client.state());
+            printSerialInt(mqttClient.state());
             if (count >= 10)
             {
               printSerialln(" Unable to connect, reset");
@@ -394,8 +426,8 @@ void reconnect()
             }
         }
     }
-    
-    if (count != 0 && client.connected())
+
+    if (count != 0 && mqttClient.connected())
       count = 0;
 }
 
@@ -443,7 +475,7 @@ void statusGarage(int index, int statusGarageOpenPin, int statusGarageClosePin, 
       statusGarageClose = !statusGarageOpen;
 
     if (statusGaragePin != 0)
-      digitalWrite(statusGaragePin, statusGarageOpen0);    
+      digitalWrite(statusGaragePin, statusGarageOpen0);
 
     sprintf(buf2, MQTTid "/Garage%d", index + 1);
     sprintf(buf1, statusGarageOpen == 0 ? statusGarageClose == 0 ? "Open and Closed" : "Open" : statusGarageClose == 0 ? "Closed" : "In between");
@@ -455,8 +487,8 @@ void statusGarage(int index, int statusGarageOpenPin, int statusGarageClosePin, 
     printSerial(buf2);
     printSerial(": ");
     printSerialln(buf1);
-    if (client.connected())
-      client.publish(buf2, buf1, true);
+    if (mqttClient.connected())
+      mqttClient.publish(buf2, buf1, true);
   }
 }
 
@@ -470,7 +502,7 @@ void statusGarages()
     statusGarage(index, garageData[index].statusGarageOpenPin, garageData[index].statusGarageClosePin, garageData[index].statusGaragePin, debounceGarage, statusGarageOpen, statusGarageClose);
     garageData[index].debounceGarage = debounceGarage;
     garageData[index].statusGarageOpen = statusGarageOpen;
-    garageData[index].statusGarageClose = statusGarageClose;    
+    garageData[index].statusGarageClose = statusGarageClose;
   }
 }
 
@@ -483,19 +515,39 @@ void callback(char* topic, byte* payload, unsigned int length)
 {
   char buf[sizeof(GARAGEDOORCODE) + 1];
   char str[2] = " ";
+  bool print = true;
 
   printSerial("Message arrived [");
   printSerial(topic);
   printSerial("] ");
   memset(buf, 'x', sizeof(buf) - 1);
+  buf[min(sizeof(buf) - 1, length)] = 0;
   for (int i = 0; i < length; i++)
   {
-    if (i < sizeof(GARAGEDOORCODE) - 1)
+    if (i < sizeof(buf) - 2)
       buf[i] = (char)payload[i];
-    str[0] = (char)payload[i];
-    printSerial(str);
+    else
+    {
+      print = false;
+      if (i == sizeof(buf) - 2)
+      {
+        char c = buf[i];
+        buf[i] = 0;
+        printSerial(buf);
+        buf[i] = c;
+      }
+      str[0] = (char)payload[i];
+      printSerial(str);
+    }
   }
   buf[min(sizeof(buf) - 1, length)] = 0;
+  if (print)
+  {
+    if (checkCode(buf))
+      printSerial("*");
+    else
+      printSerial(buf);
+  }
 
   printSerialln();
   printSerial("length: ");
@@ -541,7 +593,6 @@ void callback(char* topic, byte* payload, unsigned int length)
           sprintf(buf, "Switch garage %d", index + 1);
           message(buf);
 
-          //digitalWrite(switchGarage1Pin, !digitalRead(switchGarage1Pin));
           digitalWrite(garageData[index].switchGaragePin, HIGH);
           delay(500);
           digitalWrite(garageData[index].switchGaragePin, LOW);
@@ -556,12 +607,36 @@ void callback(char* topic, byte* payload, unsigned int length)
 
 #define UPDATEPAGE "/jsdlmkfjcnsdjkqcfjdlkckslcndsjfsdqfjksd" // a name that nobody can figure out
 
+#define HTMLHOMECONTENTSTART "<html><body>" myName " - current version " VERSIONSTRING
+#define HTMLHOMECONTENTEND "</body></html>"
+#define HTMLBORDERSTART "<fieldset style='display: inline-block; border: 2px solid black; padding: 10px;'><legend style='font-weight: bold; padding: 0 5px;'>Message history</legend>"
+#define HTMLBORDEREND "</fieldset>"
+#define HTMLNEWLINE "<br>"
+
+#if defined LOGGING
+char messagebuf[sizeof(HTMLHOMECONTENTSTART) - 1 + sizeof(HTMLNEWLINE) - 1 + sizeof(HTMLNEWLINE) - 1 + sizeof(HTMLBORDERSTART) - 1 + maxNLogs * (maxLogSize + sizeof(HTMLNEWLINE) - 1) + sizeof(HTMLBORDEREND) - 1 + sizeof(HTMLHOMECONTENTEND) - 1 + 1];
+#endif
+
 char *homeContent()
 {
-  return
-"<body>"
-myName " - current version " VERSIONSTRING
-"</body>";
+#if defined LOGGING
+  sprintf(messagebuf, HTMLHOMECONTENTSTART HTMLNEWLINE HTMLNEWLINE HTMLBORDERSTART);
+  int j = logsIndex;
+  for (int i = 0; i < maxNLogs; i++)
+  {
+    if (++j >= maxNLogs)
+      j = 0;
+    if (logs[j][0])
+    {
+      strcat(messagebuf, logs[j]);
+      strcat(messagebuf, HTMLNEWLINE);
+    }
+  }
+  strcat(messagebuf, HTMLBORDEREND HTMLHOMECONTENTEND);
+  return messagebuf;
+#else
+  return HTMLHOMECONTENTSTART HTMLHOMECONTENTEND;
+#endif
 }
 
 const char *uploadContent =
@@ -613,17 +688,21 @@ const char *host = myName;
 void setupOTA()
 {
   /*use mdns for host name resolution*/
-  if (!MDNS.begin(host)) { //http://esp32.local
+  if (!MDNS.begin(host))
+  { //http://esp32.local
     printSerialln("Error setting up MDNS responder!");
-    while (1) {
+    while (1)
+    {
       delay(1000);
     }
   }
   printSerialln("mDNS responder started");
  /*return home */
- server.on("/", HTTP_GET, []() {
+ server.on("/", HTTP_GET, []()
+ {
     // See https://github.com/espressif/arduino-esp32/blob/master/libraries/WebServer/examples/HttpBasicAuth/HttpBasicAuth.ino
-    if (!server.authenticate(UPLOADUSER, UPLOADPASSWORD)) {
+    if (!server.authenticate(UPLOADUSER, UPLOADPASSWORD))
+    {
       return server.requestAuthentication();
     }
     server.sendHeader("Connection", "close");
@@ -631,39 +710,51 @@ void setupOTA()
   });
 
   /*return upload page which is stored in uploadContent */
-  server.on("/upload", HTTP_GET, []() {
+  server.on("/upload", HTTP_GET, []()
+  {
     // See https://github.com/espressif/arduino-esp32/blob/master/libraries/WebServer/examples/HttpBasicAuth/HttpBasicAuth.ino
-    if (!server.authenticate(UPLOADUSER, UPLOADPASSWORD)) {
+    if (!server.authenticate(UPLOADUSER, UPLOADPASSWORD))
+    {
       return server.requestAuthentication();
     }
     server.sendHeader("Connection", "close");
     server.send(200, "text/html", uploadContent);
   });
   /*handling uploading firmware file */
-  server.on(UPDATEPAGE, HTTP_POST, []() {
+  server.on(UPDATEPAGE, HTTP_POST, []()
+  {
     // See https://github.com/espressif/arduino-esp32/blob/master/libraries/WebServer/examples/HttpBasicAuth/HttpBasicAuth.ino
-    if (!server.authenticate(UPLOADUSER, UPLOADPASSWORD)) {
+    if (!server.authenticate(UPLOADUSER, UPLOADPASSWORD))
+    {
       return server.requestAuthentication();
     }
     server.sendHeader("Connection", "close");
     server.send(200, "text/plain", (Update.hasError()) ? "FAIL" : "OK");
     ESP.restart();
-  }, []() {
+  }, []()
+  {
     HTTPUpload& upload = server.upload();
-    if (upload.status == UPLOAD_FILE_START) {
+    if (upload.status == UPLOAD_FILE_START)
+    {
       Serial.printf("Update: %s\n", upload.filename.c_str());
-      if (!Update.begin(UPDATE_SIZE_UNKNOWN)) { //start with max available size
+      if (!Update.begin(UPDATE_SIZE_UNKNOWN))
+      { //start with max available size
         Update.printError(Serial);
       }
-    } else if (upload.status == UPLOAD_FILE_WRITE) {
+    } else if (upload.status == UPLOAD_FILE_WRITE)
+    {
       /* flashing firmware to ESP*/
-      if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
+      if (Update.write(upload.buf, upload.currentSize) != upload.currentSize)
+      {
         Update.printError(Serial);
       }
-    } else if (upload.status == UPLOAD_FILE_END) {
-      if (Update.end(true)) { //true to set the size to the current progress
+    } else if (upload.status == UPLOAD_FILE_END)
+    {
+      if (Update.end(true))
+      { //true to set the size to the current progress
         Serial.printf("Update Success: %u\nRebooting...\n", upload.totalSize);
-      } else {
+      } else
+      {
         Update.printError(Serial);
       }
     }
@@ -676,6 +767,11 @@ void setupOTA()
 
 void setup()
 {
+# if defined LOGGING
+    for (int i = 0; i < maxNLogs; i++)
+      logs[i][0] = logs[i][maxLogSize - 1] = 0;
+# endif
+
   SetupReset();
 
 # if defined ESP32_DEVKIT_V1
@@ -716,9 +812,10 @@ void setup()
   WiFi.begin(WIFISSID, WIFIPASSWORD);
 
   unsigned long t1 = millis();
-  while (WiFi.status() != WL_CONNECTED) {
+  while (WiFi.status() != WL_CONNECTED)
+  {
       unsigned long t2 = millis();
-      if (t2 - t1 > 1 * 60 * 1000) // try 10 minutes
+      if (t2 - t1 > 5 * 60 * 1000) // try 5 minutes
         DoReset();
 
       delay(500);
@@ -757,13 +854,16 @@ void setup()
   if (Ethernet.begin(mac) == 0) {
     printSerialln("Failed to configure Ethernet using DHCP");
     // Check for Ethernet hardware present
-    if (Ethernet.hardwareStatus() == EthernetNoHardware) {
+    if (Ethernet.hardwareStatus() == EthernetNoHardware)
+    {
       printSerialln("Ethernet shield was not found.  Sorry, can't run without hardware. :(");
-      while (true) {
+      while (true)
+      {
         delay(1); // do nothing, no point running without Ethernet hardware
       }
     }
-    if (Ethernet.linkStatus() == LinkOFF) {
+    if (Ethernet.linkStatus() == LinkOFF)
+    {
       printSerialln("Ethernet cable is not connected.");
     }
     // try to configure using IP address instead of DHCP:
@@ -776,7 +876,8 @@ void setup()
     sprintf(sip, "%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
 
     printSerialln(sip);
-  } else {
+  } else
+  {
     printSerial("  DHCP assigned IP ");
     IPAddress ip = Ethernet.localIP();
 
@@ -794,8 +895,9 @@ void setup()
   // give the Ethernet shield a second to initialize:
   delay(1000);
 
-  client.setServer(MQTTHOST, 1883);
-  client.setCallback(callback);
+  mqttClient.setServer(MQTTHOST, 1883);
+  mqttClient.setKeepAlive(60);
+  mqttClient.setCallback(callback);
 
   setupOTA();
 
@@ -809,10 +911,10 @@ void setup()
 void loop()
 {
     reconnect();
-    if (client.connected())
+    if (mqttClient.connected())
     {
       statusGarages();
-      client.loop();
+      mqttClient.loop();
     }
 
 #if defined OTA
@@ -848,10 +950,16 @@ void loop()
       char buf[50];
 
       sprintf(buf, "%u:%02d:%02d:%02d", uptimeDays, (int)uptimeHours, (int)uptimeMinutes, (int)uptimeSeconds);
-      printSerial("Uptime: ");
-      printSerialln(buf);
-      if (client.connected())
-        client.publish(MQTTid "/UpTime", buf, true);
+      //printSerial("Uptime: ");
+      //printSerialln(buf);
+      if (mqttClient.connected())
+        mqttClient.publish(MQTTid "/UpTime", buf, true);
+      else
+      {
+        printSerialln("MQTT not connected...");
+        printSerial("Uptime: ");
+        printSerialln(buf);
+      }
     }
 
     clearMessageWhenNeeded();
