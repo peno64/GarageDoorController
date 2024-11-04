@@ -614,13 +614,13 @@ void callback(char* topic, byte* payload, unsigned int length)
 #define HTMLNEWLINE "<br>"
 
 #if defined LOGGING
-char messagebuf[sizeof(HTMLHOMECONTENTSTART) - 1 + sizeof(HTMLNEWLINE) - 1 + sizeof(HTMLNEWLINE) - 1 + sizeof(HTMLBORDERSTART) - 1 + maxNLogs * (maxLogSize + sizeof(HTMLNEWLINE) - 1) + sizeof(HTMLBORDEREND) - 1 + sizeof(HTMLHOMECONTENTEND) - 1 + 1];
+char messagebuf[sizeof(HTMLHOMECONTENTSTART) - 1 + 25 + sizeof(HTMLNEWLINE) - 1 + sizeof(HTMLNEWLINE) - 1 + sizeof(HTMLBORDERSTART) - 1 + maxNLogs * (maxLogSize + sizeof(HTMLNEWLINE) - 1) + sizeof(HTMLBORDEREND) - 1 + sizeof(HTMLHOMECONTENTEND) - 1 + 1];
 #endif
 
 char *homeContent()
 {
 #if defined LOGGING
-  sprintf(messagebuf, HTMLHOMECONTENTSTART HTMLNEWLINE HTMLNEWLINE HTMLBORDERSTART);
+  sprintf(messagebuf, "%s - Uptime: %u:%02d:%02d:%02d%s%s%s", HTMLHOMECONTENTSTART, uptimeDays, (int)uptimeHours, (int)uptimeMinutes, (int)uptimeSeconds, HTMLNEWLINE, HTMLNEWLINE, HTMLBORDERSTART);
   int j = logsIndex;
   for (int i = 0; i < maxNLogs; i++)
   {
