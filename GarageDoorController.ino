@@ -621,7 +621,7 @@ char *homeContent()
 {
 #if defined LOGGING
   sprintf(messagebuf, "%s - Uptime: %u:%02d:%02d:%02d%s%s%s", HTMLHOMECONTENTSTART, uptimeDays, (int)uptimeHours, (int)uptimeMinutes, (int)uptimeSeconds, HTMLNEWLINE, HTMLNEWLINE, HTMLBORDERSTART);
-  int j = logsIndex;
+  int j = logsIndex - 1;
   for (int i = 0; i < maxNLogs; i++)
   {
     if (++j >= maxNLogs)
