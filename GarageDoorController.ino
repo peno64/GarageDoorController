@@ -511,6 +511,13 @@ bool checkCode(char* payload)
   return (strlen(payload) == (sizeof(GARAGEDOORCODE) - 1)) && (strcmp(payload, GARAGEDOORCODE) == 0);
 }
 
+void switchGarage(int index)
+{
+  digitalWrite(garageData[index].switchGaragePin, HIGH);
+  delay(500);
+  digitalWrite(garageData[index].switchGaragePin, LOW);
+}
+
 void callback(char* topic, byte* payload, unsigned int length)
 {
   char buf[sizeof(GARAGEDOORCODE) + 1];
@@ -593,9 +600,7 @@ void callback(char* topic, byte* payload, unsigned int length)
           sprintf(buf, "Switch garage %d", index + 1);
           message(buf);
 
-          digitalWrite(garageData[index].switchGaragePin, HIGH);
-          delay(500);
-          digitalWrite(garageData[index].switchGaragePin, LOW);
+          switchGarage(index);
           break;
         }
       }
@@ -605,22 +610,47 @@ void callback(char* topic, byte* payload, unsigned int length)
 
 #if defined OTA
 
-#define UPDATEPAGE "/jsdlmkfjcnsdjkqcfjdlkckslcndsjfsdqfjksd" // a name that nobody can figure out
+#include "fs_WebServer.h"
 
-#define HTMLHOMECONTENTSTART "<html><body>" myName " - current version " VERSIONSTRING
-#define HTMLHOMECONTENTEND "</body></html>"
-#define HTMLBORDERSTART "<fieldset style='display: inline-block; border: 2px solid black; padding: 10px;'><legend style='font-weight: bold; padding: 0 5px;'>Message history</legend>"
-#define HTMLBORDEREND "</fieldset>"
-#define HTMLNEWLINE "<br>"
+fs_WebServer server(80);
 
-#if defined LOGGING
-char messagebuf[sizeof(HTMLHOMECONTENTSTART) - 1 + 25 + sizeof(HTMLNEWLINE) - 1 + sizeof(HTMLNEWLINE) - 1 + sizeof(HTMLBORDERSTART) - 1 + maxNLogs * (maxLogSize + sizeof(HTMLNEWLINE) - 1) + sizeof(HTMLBORDEREND) - 1 + sizeof(HTMLHOMECONTENTEND) - 1 + 1];
-#endif
-
-char *homeContent()
+void garagesContent()
 {
+  server.chunkedResponseModeStart(200, "text/html");
+
+  server.sendContent("<html><head><meta name='viewport' content='width=device-width, initial-scale=1.0'></head><body><h3>" myName "</h3><table>");
+
+  for (int index = 0; index < nGarages; index++)
+  {
+    char buf[3];
+
+    server.sendContent("<tr><td>Garage ");
+    sprintf(buf, "%d", index + 1);
+    server.sendContent(buf);
+    server.sendContent(":</td><td>");
+    int statusGarageOpen = garageData[index].statusGarageOpen;
+    int statusGarageClose = garageData[index].statusGarageClose;
+    server.sendContent(statusGarageOpen == 0 ? statusGarageClose == 0 ? "Open and Closed" : "Open" : statusGarageClose == 0 ? "Closed" : "In between");
+    server.sendContent("</td><td><a href='/switchgarage");
+    server.sendContent(buf);
+    server.sendContent("'><button>Switch</button></a></td></tr>");
+  }
+
+  server.sendContent("</table><br><a href='/garages'><button>Refresh</button></a><br><br><a href='/'><button>Main menu</button></a>");
+
+  server.chunkedResponseFinalize();
+}
+
+void logContent()
+{
+  server.chunkedResponseModeStart(200, "text/html");
+  
 #if defined LOGGING
-  sprintf(messagebuf, "%s - Uptime: %u:%02d:%02d:%02d%s%s%s", HTMLHOMECONTENTSTART, uptimeDays, (int)uptimeHours, (int)uptimeMinutes, (int)uptimeSeconds, HTMLNEWLINE, HTMLNEWLINE, HTMLBORDERSTART);
+  server.sendContent("<html><head><meta name='viewport' content='width=device-width, initial-scale=1.0'></head><body>" myName " - current version " VERSIONSTRING " - Uptime: ");
+  char buf[14];
+  sprintf(buf, "%u:%02d:%02d:%02d", uptimeDays, (int)uptimeHours, (int)uptimeMinutes, (int)uptimeSeconds);
+  server.sendContent(buf);
+  server.sendContent("<br><br><fieldset style='display: inline-block; border: 2px solid black; padding: 10px;'><legend style='font-weight: bold; padding: 0 5px;'>Message history</legend>");
   int j = logsIndex - 1;
   for (int i = 0; i < maxNLogs; i++)
   {
@@ -628,18 +658,21 @@ char *homeContent()
       j = 0;
     if (logs[j][0])
     {
-      strcat(messagebuf, logs[j]);
-      strcat(messagebuf, HTMLNEWLINE);
+      server.sendContent(logs[j]);
+      server.sendContent("<br>");
     }
   }
-  strcat(messagebuf, HTMLBORDEREND HTMLHOMECONTENTEND);
-  return messagebuf;
+  server.sendContent("</fieldset><br><br><a href='/log'><button>Refresh</button></a><br><br><a href='/'><button>Main menu</button></a></body></html>");
 #else
-  return HTMLHOMECONTENTSTART HTMLHOMECONTENTEND;
+  server.sendContent("<html><body>" myName " - current version " VERSIONSTRING "<br><a href='/'><button>Main menu</button></a></body></html>");
 #endif
+  server.chunkedResponseFinalize();
 }
 
+#define UPDATEPAGE "/jsdlmkfjcnsdjkqcfjdlkckslcndsjfsdqfjksd" // a name that nobody can figure out
+
 const char *uploadContent =
+"<head><meta name='viewport' content='width=device-width, initial-scale=1.0'></head>"
 "<script src='https://ajax.googleapis.com/ajax/libs/jquery/3.2.1/jquery.min.js'></script>"
 "<form method='POST' action='#' enctype='multipart/form-data' id='upload_form'>"
    "Update firmware " myName " (current version " VERSIONSTRING ")"
@@ -651,6 +684,7 @@ const char *uploadContent =
    "<input type='submit' value='Update'>"
 "</form>"
  "<div id='prg'>progress: 0%</div>"
+ "<br><a href='/'><button>Main menu</button></a>"
  "<script>"
   "$('form').submit(function(e){"
   "e.preventDefault();"
@@ -681,8 +715,6 @@ const char *uploadContent =
  "});"
  "</script>";
 
-WebServer server(80);
-
 const char *host = myName;
 
 void setupOTA()
@@ -697,7 +729,8 @@ void setupOTA()
     }
   }
   printSerialln("mDNS responder started");
- /*return home */
+
+ /*home*/
  server.on("/", HTTP_GET, []()
  {
     // See https://github.com/espressif/arduino-esp32/blob/master/libraries/WebServer/examples/HttpBasicAuth/HttpBasicAuth.ino
@@ -705,8 +738,54 @@ void setupOTA()
     {
       return server.requestAuthentication();
     }
+
     server.sendHeader("Connection", "close");
-    server.send(200, "text/html", homeContent());
+    server.send(200, "text/html", "<html><head><meta name='viewport' content='width=device-width, initial-scale=1.0'></head><body><h3>" myName "</h3><table><tr><td><a href='/garages'><button>Garages</button></a></td></tr><tr><td><a href='/log'><button>Log</button></a></td></tr><tr><td><a href='/upload'><button>Update firmware</button></a></td></tr></table></body></html>");
+  });
+
+/*garages*/
+ server.on("/garages", HTTP_GET, []()
+ {
+    // See https://github.com/espressif/arduino-esp32/blob/master/libraries/WebServer/examples/HttpBasicAuth/HttpBasicAuth.ino
+    if (!server.authenticate(UPLOADUSER, UPLOADPASSWORD))
+    {
+      return server.requestAuthentication();
+    }
+    garagesContent();
+  });
+
+  for (int index = 0; index < nGarages; index++)
+  {
+    char buf[16];
+
+    sprintf(buf, "/switchgarage%d", index + 1);
+
+    server.on(buf, HTTP_GET, [index]()
+    {
+        // See https://github.com/espressif/arduino-esp32/blob/master/libraries/WebServer/examples/HttpBasicAuth/HttpBasicAuth.ino
+        if (!server.authenticate(UPLOADUSER, UPLOADPASSWORD))
+        {
+          return server.requestAuthentication();
+        }
+
+        switchGarage(index);
+
+        delay(1000);
+
+        server.sendHeader("Connection", "close");
+        server.send(200, "text/html", "<html><head><meta http-equiv='refresh' content='0;url=/garages'></head><body><a href='/'><button>Main menu</button></a></body></html>");
+      });
+  }
+
+ /*logs*/
+ server.on("/log", HTTP_GET, []()
+ {
+    // See https://github.com/espressif/arduino-esp32/blob/master/libraries/WebServer/examples/HttpBasicAuth/HttpBasicAuth.ino
+    if (!server.authenticate(UPLOADUSER, UPLOADPASSWORD))
+    {
+      return server.requestAuthentication();
+    }
+    logContent();
   });
 
   /*return upload page which is stored in uploadContent */
