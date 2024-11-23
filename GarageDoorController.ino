@@ -669,6 +669,34 @@ void logContent()
   server.chunkedResponseFinalize();
 }
 
+void serverSendContent(char *data)
+{
+  server.sendContent(data);
+  server.sendContent("<br>");
+}
+
+void info()
+{
+  char buf[50];
+
+  server.chunkedResponseModeStart(200, "text/html");
+
+  server.sendContent("<html><head><meta name='viewport' content='width=device-width, initial-scale=1.0'></head><body>" myName " - current version " VERSIONSTRING " - Uptime: ");
+  sprintf(buf, "%u:%02d:%02d:%02d", uptimeDays, (int)uptimeHours, (int)uptimeMinutes, (int)uptimeSeconds);
+  server.sendContent(buf);
+  server.sendContent("<br><br>");
+
+# if defined WIFI  
+  extern void printWiFi(void (*callback)(char *));
+
+  printWiFi(serverSendContent);
+#endif
+
+  server.sendContent("<br><br><a href='/'><button>Main menu</button></a></body></html>");
+
+  server.chunkedResponseFinalize();
+}
+
 #define UPDATEPAGE "/jsdlmkfjcnsdjkqcfjdlkckslcndsjfsdqfjksd" // a name that nobody can figure out
 
 const char *uploadContent =
@@ -740,7 +768,16 @@ void setupOTA()
     }
 
     server.sendHeader("Connection", "close");
-    server.send(200, "text/html", "<html><head><meta name='viewport' content='width=device-width, initial-scale=1.0'></head><body><h3>" myName "</h3><table><tr><td><a href='/garages'><button>Garages</button></a></td></tr><tr><td><a href='/log'><button>Log</button></a></td></tr><tr><td><a href='/upload'><button>Update firmware</button></a></td></tr></table></body></html>");
+    server.send(200, "text/html",
+    "<html><head><meta name='viewport' content='width=device-width, initial-scale=1.0'></head><body>"
+    "<h3>" myName "</h3>"
+    "<table>"
+    "<tr><td><a href='/garages'><button>Garages</button></a></td></tr>"
+    "<tr><td><a href='/log'><button>Log</button></a></td></tr>"
+    "<tr><td><a href='/info'><button>Info</button></a></td></tr>"
+    "<tr><td><a href='/upload'><button>Update firmware</button></a></td></tr>"
+    "</table>"
+    "</body></html>");
   });
 
 /*garages*/
@@ -786,6 +823,17 @@ void setupOTA()
       return server.requestAuthentication();
     }
     logContent();
+  });
+
+ /*info*/
+ server.on("/info", HTTP_GET, []()
+ {
+    // See https://github.com/espressif/arduino-esp32/blob/master/libraries/WebServer/examples/HttpBasicAuth/HttpBasicAuth.ino
+    if (!server.authenticate(UPLOADUSER, UPLOADPASSWORD))
+    {
+      return server.requestAuthentication();
+    }
+    info();
   });
 
   /*return upload page which is stored in uploadContent */
@@ -842,6 +890,117 @@ void setupOTA()
   server.begin();
 }
 
+#endif // OTA
+
+#if defined WIFI
+
+uint8_t BSSID[6];
+
+void printWiFi(void (*callback)(char *))
+{
+  char buf[50];
+
+  sprintf(buf, "SSID: %s", WiFi.SSID());
+  callback(buf);
+
+  IPAddress ip = WiFi.localIP();
+  sprintf(buf, "IP address: %d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
+  callback(buf);
+ 
+  byte mac[6];
+  WiFi.macAddress(mac);
+  sprintf(buf, "MAC address: %02X:%02X:%02X:%02X:%02X:%02X", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+  callback(buf);
+
+  uint8_t* currentBSSID = WiFi.BSSID();
+  sprintf(buf, "BSSID: %02X:%02X:%02X:%02X:%02X:%02X", currentBSSID[0], currentBSSID[1], currentBSSID[2], currentBSSID[3], currentBSSID[4], currentBSSID[5]);
+  callback(buf);
+
+  sprintf(buf, "RRSI: %d dBm", (int)WiFi.RSSI());
+  callback(buf);
+}
+
+void wifiBegin()
+{
+  WiFi.disconnect(); // Ensure no active connection during the scan
+  delay(1000);
+
+  // Search all routers that give this SSID signal
+  // Determine the best signal
+  int numNetworks = WiFi.scanNetworks(false, false, false, 0, 300, WIFISSID);
+  int maxSignal = -1000;
+  for (int i = 0; i < numNetworks; i++) 
+  {
+    char buf[255];
+
+    sprintf(buf, "%d: SSID: %s, RRSI: %d dBm, BSSID: %02X:%02X:%02X:%02X:%02X:%02X",
+                  i + 1,
+                  WiFi.SSID(i).c_str(),
+                  WiFi.RSSI(i),
+                  WiFi.BSSID(i)[0], WiFi.BSSID(i)[1], WiFi.BSSID(i)[2],
+                  WiFi.BSSID(i)[3], WiFi.BSSID(i)[4], WiFi.BSSID(i)[5]);
+    if (WiFi.RSSI(i) > maxSignal)
+    {
+      maxSignal = WiFi.RSSI(i);
+      for (int j = 0; j < 6; j++)        
+        BSSID[j] = WiFi.BSSID(i)[j];
+    }
+    printSerialln(buf);
+  }
+
+  if (maxSignal != -1000)
+  {
+    char buf[255];
+    sprintf(buf, "Selected BSSID: %02X:%02X:%02X:%02X:%02X:%02X", BSSID[0], BSSID[1], BSSID[2], BSSID[3], BSSID[4], BSSID[5]);
+    printSerialln(buf);
+  }
+  else
+    printSerialln("SSID not found...");
+
+  WiFi.scanDelete();
+
+  if (maxSignal != -1000)
+    WiFi.begin(WIFISSID, WIFIPASSWORD, 0, BSSID);
+  else
+    WiFi.begin(WIFISSID, WIFIPASSWORD);
+
+  printSerial("Connecting WiFi");
+  unsigned long t1 = millis();
+  while (WiFi.status() != WL_CONNECTED)
+  {
+      unsigned long t2 = millis();
+      if (t2 - t1 > 5 * 60 * 1000) // try 5 minutes
+        DoReset();
+
+      delay(500);
+      printSerial(".");
+  }
+
+  printSerialln();
+  printSerialln("WiFi connected");
+
+  uint8_t* currentBSSID = WiFi.BSSID();
+  for (int j = 0; j < 6; j++)        
+    BSSID[j] = currentBSSID[j];
+
+  printWiFi(printSerialln);
+}
+
+void checkBSSID()
+{
+  int j;
+
+  uint8_t* currentBSSID = WiFi.BSSID();
+  for (j = 0; j < 6 && BSSID[j] == currentBSSID[j]; j++)
+    ;
+
+  if (j < 6)
+  {
+    printSerialln("BSSID changed");    
+    wifiBegin();
+  }
+}
+
 #endif
 
 void setup()
@@ -888,36 +1047,8 @@ void setup()
   printSerialln((char*)WIFISSID);
 
   WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFISSID, WIFIPASSWORD);
 
-  unsigned long t1 = millis();
-  while (WiFi.status() != WL_CONNECTED)
-  {
-      unsigned long t2 = millis();
-      if (t2 - t1 > 5 * 60 * 1000) // try 5 minutes
-        DoReset();
-
-      delay(500);
-      printSerial(".");
-  }
-
-  printSerialln();
-  printSerialln("WiFi connected");
-
-  IPAddress ip = WiFi.localIP();
-
-  char buf[50];
-  sprintf(buf, "IP address: %d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
-
-  printSerialln(buf);
-
-  byte mac[6];
-  WiFi.macAddress(mac);
-  sprintf(buf, "MAC address: %02x:%02x:%02x:%02x:%02x:%02x", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-  printSerialln(buf);
-
-  sprintf(buf, "RRSI: %d", (int)WiFi.RSSI());
-  printSerialln(buf);
+  wifiBegin();
 
 #else
 
@@ -1025,6 +1156,9 @@ void loop()
           }
         }
       }
+
+      if (uptimeSeconds == 0)
+        checkBSSID();
 
       char buf[50];
 
