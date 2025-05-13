@@ -377,7 +377,7 @@ void reconnect()
     static unsigned long msWait = 0;
 
     // Loop until we're reconnected
-    if ((count == 0 || millis() - msWait > 5000) &&
+    if ((count == 0 || millis() - msWait > 5000 /* 5 sec */) &&
         (!mqttClient.connected()))
     {
         printSerial("Attempting MQTT connection (");
@@ -411,7 +411,7 @@ void reconnect()
         {
             printSerial("failed, rc=");
             printSerialInt(mqttClient.state());
-            if (count >= 10)
+            if (count >= 15 * 60 / 5) // 15 min = 15 * 60 sec = 900 sec = 900 sec / 5 sec = 180 times retry per 5 seconds = 15 minutes
             {
               printSerialln(" Unable to connect, reset");
               delay(500);
@@ -644,7 +644,7 @@ void garagesContent()
 void logContent()
 {
   server.chunkedResponseModeStart(200, "text/html");
-  
+
 #if defined LOGGING
   server.sendContent("<html><head><meta name='viewport' content='width=device-width, initial-scale=1.0'></head><body>" myName " - current version " VERSIONSTRING " - Uptime: ");
   char buf[14];
@@ -686,7 +686,7 @@ void info()
   server.sendContent(buf);
   server.sendContent("<br><br>");
 
-# if defined WIFI  
+# if defined WIFI
   extern void printWiFi(void (*callback)(char *));
 
   printWiFi(serverSendContent);
@@ -906,7 +906,7 @@ void printWiFi(void (*callback)(char *))
   IPAddress ip = WiFi.localIP();
   sprintf(buf, "IP address: %d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
   callback(buf);
- 
+
   byte mac[6];
   WiFi.macAddress(mac);
   sprintf(buf, "MAC address: %02X:%02X:%02X:%02X:%02X:%02X", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
@@ -929,7 +929,7 @@ void wifiBegin()
   // Determine the best signal
   int numNetworks = WiFi.scanNetworks(false, false, false, 0, 300, WIFISSID);
   int maxSignal = -1000;
-  for (int i = 0; i < numNetworks; i++) 
+  for (int i = 0; i < numNetworks; i++)
   {
     char buf[255];
 
@@ -942,7 +942,7 @@ void wifiBegin()
     if (WiFi.RSSI(i) > maxSignal)
     {
       maxSignal = WiFi.RSSI(i);
-      for (int j = 0; j < 6; j++)        
+      for (int j = 0; j < 6; j++)
         BSSID[j] = WiFi.BSSID(i)[j];
     }
     printSerialln(buf);
@@ -980,7 +980,7 @@ void wifiBegin()
   printSerialln("WiFi connected");
 
   uint8_t* currentBSSID = WiFi.BSSID();
-  for (int j = 0; j < 6; j++)        
+  for (int j = 0; j < 6; j++)
     BSSID[j] = currentBSSID[j];
 
   printWiFi(printSerialln);
@@ -996,7 +996,7 @@ void checkBSSID()
 
   if (j < 6)
   {
-    printSerialln("BSSID changed");    
+    printSerialln("BSSID changed");
     wifiBegin();
   }
 }
