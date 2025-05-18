@@ -37,6 +37,9 @@
 #define MQTTid "Garage" postfix
 #define MQTTcmd MQTTid "Cmd"
 
+#define ReconnectWaitSeconds 5
+#define ReconnectRebootMinutes 30
+
 #define ESP32_DEVKIT_V1
 
 #if defined ESP32_DEVKIT_V1
@@ -377,7 +380,7 @@ void reconnect()
     static unsigned long msWait = 0;
 
     // Loop until we're reconnected
-    if ((count == 0 || millis() - msWait > 5000 /* 5 sec */) &&
+    if ((count == 0 || millis() - msWait > ReconnectWaitSeconds * 1000) &&
         (!mqttClient.connected()))
     {
         printSerial("Attempting MQTT connection (");
@@ -411,7 +414,7 @@ void reconnect()
         {
             printSerial("failed, rc=");
             printSerialInt(mqttClient.state());
-            if (count >= 15 * 60 / 5) // 15 min = 15 * 60 sec = 900 sec = 900 sec / 5 sec = 180 times retry per 5 seconds = 15 minutes
+            if (count >= ReconnectRebootMinutes * 60 / ReconnectWaitSeconds)
             {
               printSerialln(" Unable to connect, reset");
               delay(500);
