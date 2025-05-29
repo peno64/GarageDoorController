@@ -26,6 +26,8 @@
 
 */
 
+//#define WOKWI // simulator https://wokwi.com/
+
 #include "secret.h"
 
 #define postfix ""
@@ -34,7 +36,11 @@
 
 #define VERSIONSTRING "Copyright peno " __DATE__ " " __TIME__
 
+#if defined WOKWI
+#define MQTTid "wokwiGarage" postfix
+#else
 #define MQTTid "Garage" postfix
+#endif
 #define MQTTcmd MQTTid "Cmd"
 
 #define ReconnectWaitSeconds 5
@@ -42,7 +48,7 @@
 
 #define ESP32_DEVKIT_V1
 
-#if defined ESP32_DEVKIT_V1
+#if defined ESP32_DEVKIT_V1 && !defined WOKWI
 # define SERIALBT
 #endif
 
@@ -69,7 +75,9 @@ BluetoothSerial SerialBT;
 
 #if defined ESP32_DEVKIT_V1
 #define WIFI
+#if !defined WOKWI
 #define OTA
+#endif
 #endif
 
 #include <PubSubClient.h>
@@ -220,6 +228,7 @@ struct garageData
   int statusGaragePin;          // relais pin showing open/close garage status - can be 0
   int statusGarageOpen;         // switch garage open
   int statusGarageClose;        // switch garage closed
+  int statusGarageInbetween;    // in between status
   unsigned long debounceGarage; // debounce value
 };
 
@@ -434,7 +443,7 @@ void reconnect()
       count = 0;
 }
 
-void statusGarage(int index, int statusGarageOpenPin, int statusGarageClosePin, int statusGaragePin, unsigned long &debounceGarage, int &statusGarageOpen, int &statusGarageClose)
+void statusGarage(int index, int statusGarageOpenPin, int statusGarageClosePin, int statusGaragePin, unsigned long &debounceGarage, int &statusGarageOpen, int &statusGarageClose, int &statusGarageInbetween)
 {
   char buf1[50], buf2[50];
   int statusGarageOpen0;
@@ -457,6 +466,11 @@ void statusGarage(int index, int statusGarageOpenPin, int statusGarageClosePin, 
   {
     debounceGarage = 0;
 
+    if (statusGarageOpenPin == 0)
+      statusGarageOpen0 = !statusGarageClose0;
+    if (statusGarageClosePin == 0)
+      statusGarageClose0 = !statusGarageOpen0;
+
     printSerial("change garage ");
     printSerialInt(index + 1);
     printSerial(" status: ");
@@ -469,19 +483,19 @@ void statusGarage(int index, int statusGarageOpenPin, int statusGarageClosePin, 
     printSerialInt(statusGarageClosePin);
     printSerialln();
 
+    if ((statusGarageOpen0 && statusGarageClose0) ||
+        (statusGarageOpenPin == 0) ||
+        (statusGarageClosePin == 0))
+      statusGarageInbetween = statusGarageOpen;
+
     statusGarageOpen = statusGarageOpen0;
     statusGarageClose = statusGarageClose0;
 
-    if (statusGarageOpenPin == 0)
-      statusGarageOpen = !statusGarageClose;
-    if (statusGarageClosePin == 0)
-      statusGarageClose = !statusGarageOpen;
-
     if (statusGaragePin != 0)
-      digitalWrite(statusGaragePin, statusGarageOpen0);
+      digitalWrite(statusGaragePin, statusGarageClose == 0 && statusGarageOpen != 0 ? LOW : HIGH);
 
     sprintf(buf2, MQTTid "/Garage%d", index + 1);
-    sprintf(buf1, statusGarageOpen == 0 ? statusGarageClose == 0 ? "Open and Closed" : "Open" : statusGarageClose == 0 ? "Closed" : "In between");
+    sprintf(buf1, statusGarageOpen == 0 ? statusGarageClose == 0 ? "Open and Closed" : "Open" : statusGarageClose == 0 ? "Closed" : statusGarageInbetween ? "Opening" : "Closing");
 
     if ((statusGarageOpen == 0 && statusGarageClose != 0) ||
         (statusGarageOpen != 0 && statusGarageClose == 0))
@@ -502,10 +516,12 @@ void statusGarages()
     unsigned long debounceGarage = garageData[index].debounceGarage;
     int statusGarageOpen = garageData[index].statusGarageOpen;
     int statusGarageClose = garageData[index].statusGarageClose;
-    statusGarage(index, garageData[index].statusGarageOpenPin, garageData[index].statusGarageClosePin, garageData[index].statusGaragePin, debounceGarage, statusGarageOpen, statusGarageClose);
+    int statusGarageInbetween = garageData[index].statusGarageInbetween;
+    statusGarage(index, garageData[index].statusGarageOpenPin, garageData[index].statusGarageClosePin, garageData[index].statusGaragePin, debounceGarage, statusGarageOpen, statusGarageClose, statusGarageInbetween);
     garageData[index].debounceGarage = debounceGarage;
     garageData[index].statusGarageOpen = statusGarageOpen;
     garageData[index].statusGarageClose = statusGarageClose;
+    garageData[index].statusGarageInbetween = statusGarageInbetween;
   }
 }
 
@@ -594,7 +610,7 @@ void callback(char* topic, byte* payload, unsigned int length)
     {
       for (int index = 0; index < nGarages; index++)
       {
-        char buf[18];
+        char buf[255];
 
         sprintf(buf, MQTTcmd "/Switch%d", index + 1);
         if (strcmp(topic, buf) == 0)
@@ -633,7 +649,8 @@ void garagesContent()
     server.sendContent(":</td><td>");
     int statusGarageOpen = garageData[index].statusGarageOpen;
     int statusGarageClose = garageData[index].statusGarageClose;
-    server.sendContent(statusGarageOpen == 0 ? statusGarageClose == 0 ? "Open and Closed" : "Open" : statusGarageClose == 0 ? "Closed" : "In between");
+    int statusGarageInbetween = garageData[index].statusGarageInbetween;
+    server.sendContent(statusGarageOpen == 0 ? statusGarageClose == 0 ? "Open and Closed" : "Open" : statusGarageClose == 0 ? "Closed" : statusGarageInbetween ? "Opening" : "Closing");
     server.sendContent("</td><td><a href='/switchgarage");
     server.sendContent(buf);
     server.sendContent("'><button>Switch</button></a></td></tr>");
@@ -1120,11 +1137,13 @@ void setup()
   // give the Ethernet shield a second to initialize:
   delay(1000);
 
-  mqttClient.setServer(MQTTHOST, 1883);
+  mqttClient.setServer(MQTTHOST, MQTTPORT);
   mqttClient.setKeepAlive(60);
   mqttClient.setCallback(callback);
 
+#if defined OTA
   setupOTA();
+#endif
 
   mytime = millis();
 
