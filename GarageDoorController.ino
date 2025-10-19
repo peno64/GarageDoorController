@@ -270,7 +270,7 @@ void KeepMessage(char *data)
 {
   if (logOffset == 0)
     logOffset += sprintf(logs[logsIndex], "%u:%02d:%02d:%02d: ", uptimeDays, (int)uptimeHours, (int)uptimeMinutes, (int)uptimeSeconds);
-  logOffset += snprintf(logs[logsIndex] + logOffset, maxLogSize - logOffset - 1, data);
+  logOffset += snprintf(logs[logsIndex] + logOffset, maxLogSize - logOffset - 1, "%s", data);
 }
 #endif
 
@@ -927,6 +927,9 @@ void setupOTA()
 #if defined WIFI
 
 uint8_t BSSID[6];
+int rssi;
+static const int RSSI_POOR_THRESHOLD_DBM = -78;
+static const int RSSI_GOOD_HYSTERESIS_DB =  8;     // require target AP to be at least 8 dB better
 
 void printWiFi(void (*callback)(char *))
 {
@@ -948,7 +951,8 @@ void printWiFi(void (*callback)(char *))
   sprintf(buf, "BSSID: %02X:%02X:%02X:%02X:%02X:%02X", currentBSSID[0], currentBSSID[1], currentBSSID[2], currentBSSID[3], currentBSSID[4], currentBSSID[5]);
   callback(buf);
 
-  sprintf(buf, "RRSI: %d dBm", (int)WiFi.RSSI());
+  int rssi = (int)WiFi.RSSI();
+  sprintf(buf, "RSSI: %d dBm (%d %%)", rssi, min(max(2 * (rssi + 100), 0), 100));
   callback(buf);
 }
 
@@ -1015,21 +1019,45 @@ void wifiBegin()
   for (int j = 0; j < 6; j++)
     BSSID[j] = currentBSSID[j];
 
+  rssi = WiFi.RSSI();
+
   printWiFi(printSerialln);
+}
+
+bool equalBSSIDs(uint8_t* BSSID1, uint8_t* BSSID2)
+{
+  int j;
+
+  for (j = 0; j < 6 && BSSID1[j] == BSSID2[j]; j++)
+    ;
+
+  return j >= 6;
 }
 
 void checkBSSID()
 {
-  int j;
-
-  uint8_t* currentBSSID = WiFi.BSSID();
-  for (j = 0; j < 6 && BSSID[j] == currentBSSID[j]; j++)
-    ;
-
-  if (j < 6)
+  if (!equalBSSIDs(BSSID, WiFi.BSSID()))
   {
-    printSerialln("BSSID changed");
+    printSerialln("BSSID changed, reconnecting WiFi");
     wifiBegin();
+  }
+}
+
+void checkRSSI()
+{
+  rssi = WiFi.RSSI();
+  if (rssi < RSSI_POOR_THRESHOLD_DBM)
+  {
+    int numNetworks = WiFi.scanNetworks(false, false, false, 0, 300, WIFISSID);
+    int i;
+    for (i = 0; i < numNetworks && (equalBSSIDs(BSSID, WiFi.BSSID(i)) || WiFi.RSSI(i) < rssi + RSSI_GOOD_HYSTERESIS_DB); i++)
+      ;
+    WiFi.scanDelete();
+    if (i < numNetworks)
+    {
+      printSerialln("Better RSSI found, reconnecting WiFi");
+      wifiBegin();
+    }
   }
 }
 
@@ -1191,8 +1219,11 @@ void loop()
         }
       }
 
-      if (uptimeSeconds == 0)
+      if (uptimeSeconds == 0) // every minute
         checkBSSID();
+
+      if (uptimeMinutes == 0) // every hour
+        checkRSSI();
 
       char buf[50];
 
