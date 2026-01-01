@@ -136,6 +136,11 @@ mqtt:
       unique_id: "GarageUpTime"
       state_topic: "Garage/UpTime"
 
+    - name: "GarageRSSI"
+      unique_id: "GarageRSSI"
+      state_topic: "Garage/RSSI"
+      unit_of_measurement: "dBm"
+
     - name: "GarageMessage"
       unique_id: "GarageMessage"
       state_topic: "Garage/Message"
@@ -1231,7 +1236,14 @@ void loop()
       //printSerial("Uptime: ");
       //printSerialln(buf);
       if (mqttClient.connected())
+      {
         mqttClient.publish(MQTTid "/UpTime", buf, true);
+
+        static int rssi_avg = -1000;
+        rssi_avg = rssi_avg == -1000 ? WiFi.RSSI() : (rssi_avg * 9 + WiFi.RSSI()) / 10;
+        sprintf(buf, "%d", rssi_avg);
+        mqttClient.publish(MQTTid "/RSSI", buf, true);
+      }
       else
       {
         printSerialln("MQTT not connected...");
