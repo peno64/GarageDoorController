@@ -638,6 +638,22 @@ void callback(char* topic, byte* payload, unsigned int length)
 
 fs_WebServer server(80);
 
+void mainMenu()
+{
+  server.sendHeader("Connection", "close");
+  server.send(200, "text/html",
+  "<html><head><meta name='viewport' content='width=device-width, initial-scale=1.0'></head><body>"
+  "<h3>" myName "</h3>"
+  "<table>"
+  "<tr><td><a href='/garages'><button>Garages</button></a></td></tr>"
+  "<tr><td><a href='/log'><button>Log</button></a></td></tr>"
+  "<tr><td><a href='/info'><button>Info</button></a></td></tr>"
+  "<tr><td><a href='/reset'><button>Reset</button></a></td></tr>"
+  "<tr><td><a href='/upload'><button>Update firmware</button></a></td></tr>"
+  "</table>"
+  "</body></html>");
+}
+
 void garagesContent()
 {
   server.chunkedResponseModeStart(200, "text/html");
@@ -783,32 +799,21 @@ void setupOTA()
   }
   printSerialln("mDNS responder started");
 
- /*home*/
- server.on("/", HTTP_GET, []()
- {
+  /*home*/
+  server.on("/", HTTP_GET, []()
+  {
     // See https://github.com/espressif/arduino-esp32/blob/master/libraries/WebServer/examples/HttpBasicAuth/HttpBasicAuth.ino
     if (!server.authenticate(UPLOADUSER, UPLOADPASSWORD))
     {
       return server.requestAuthentication();
     }
 
-    server.sendHeader("Connection", "close");
-    server.send(200, "text/html",
-    "<html><head><meta name='viewport' content='width=device-width, initial-scale=1.0'></head><body>"
-    "<h3>" myName "</h3>"
-    "<table>"
-    "<tr><td><a href='/garages'><button>Garages</button></a></td></tr>"
-    "<tr><td><a href='/log'><button>Log</button></a></td></tr>"
-    "<tr><td><a href='/info'><button>Info</button></a></td></tr>"
-    "<tr><td><a href='/reset'><button>Reset</button></a></td></tr>"
-    "<tr><td><a href='/upload'><button>Update firmware</button></a></td></tr>"
-    "</table>"
-    "</body></html>");
+    mainMenu();
   });
 
-/*garages*/
- server.on("/garages", HTTP_GET, []()
- {
+  /*garages*/
+  server.on("/garages", HTTP_GET, []()
+  {
     // See https://github.com/espressif/arduino-esp32/blob/master/libraries/WebServer/examples/HttpBasicAuth/HttpBasicAuth.ino
     if (!server.authenticate(UPLOADUSER, UPLOADPASSWORD))
     {
@@ -825,24 +830,24 @@ void setupOTA()
 
     server.on(buf, HTTP_GET, [index]()
     {
-        // See https://github.com/espressif/arduino-esp32/blob/master/libraries/WebServer/examples/HttpBasicAuth/HttpBasicAuth.ino
-        if (!server.authenticate(UPLOADUSER, UPLOADPASSWORD))
-        {
-          return server.requestAuthentication();
-        }
+      // See https://github.com/espressif/arduino-esp32/blob/master/libraries/WebServer/examples/HttpBasicAuth/HttpBasicAuth.ino
+      if (!server.authenticate(UPLOADUSER, UPLOADPASSWORD))
+      {
+        return server.requestAuthentication();
+      }
 
-        switchGarage(index);
+      switchGarage(index);
 
-        delay(1000);
+      delay(1000);
 
-        server.sendHeader("Connection", "close");
-        server.send(200, "text/html", "<html><head><meta http-equiv='refresh' content='0;url=/garages'></head><body><a href='/'><button>Main menu</button></a></body></html>");
-      });
+      server.sendHeader("Connection", "close");
+      server.send(200, "text/html", "<html><head><meta http-equiv='refresh' content='0;url=/garages'></head><body><a href='/'><button>Main menu</button></a></body></html>");
+    });
   }
 
- /*logs*/
- server.on("/log", HTTP_GET, []()
- {
+  /*logs*/
+  server.on("/log", HTTP_GET, []()
+  {
     // See https://github.com/espressif/arduino-esp32/blob/master/libraries/WebServer/examples/HttpBasicAuth/HttpBasicAuth.ino
     if (!server.authenticate(UPLOADUSER, UPLOADPASSWORD))
     {
@@ -851,9 +856,9 @@ void setupOTA()
     logContent();
   });
 
- /*info*/
- server.on("/info", HTTP_GET, []()
- {
+  /*info*/
+  server.on("/info", HTTP_GET, []()
+  {
     // See https://github.com/espressif/arduino-esp32/blob/master/libraries/WebServer/examples/HttpBasicAuth/HttpBasicAuth.ino
     if (!server.authenticate(UPLOADUSER, UPLOADPASSWORD))
     {
@@ -862,14 +867,16 @@ void setupOTA()
     info();
   });
 
- /*reset*/
- server.on("/reset", HTTP_GET, []()
- {
+  /*reset*/
+  server.on("/reset", HTTP_GET, []()
+  {
     // See https://github.com/espressif/arduino-esp32/blob/master/libraries/WebServer/examples/HttpBasicAuth/HttpBasicAuth.ino
     if (!server.authenticate(UPLOADUSER, UPLOADPASSWORD))
     {
       return server.requestAuthentication();
     }
+    mainMenu();
+    delay(1000);
     DoReset();
   });
 
@@ -884,6 +891,7 @@ void setupOTA()
     server.sendHeader("Connection", "close");
     server.send(200, "text/html", uploadContent);
   });
+  
   /*handling uploading firmware file */
   server.on(UPDATEPAGE, HTTP_POST, []()
   {
