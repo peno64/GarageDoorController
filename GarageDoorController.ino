@@ -46,12 +46,13 @@
 #define ReconnectWaitSeconds 5
 #define ReconnectRebootMinutes 30
 
-#define ESP32_DEVKIT_V1
-
-#if defined ESP32_DEVKIT_V1 && !defined WOKWI
+#if defined ARDUINO_ARCH_ESP32 && !defined WOKWI
 # define SERIALBT
 #endif
 
+#undef SERIALBT // eats up alot of heap space and results in hanging OAT upload
+
+#undef LOGGING
 #define LOGGING
 
 #if defined LOGGING
@@ -73,7 +74,7 @@ char logs[maxNLogs][maxLogSize];
 BluetoothSerial SerialBT;
 #endif
 
-#if defined ESP32_DEVKIT_V1
+#if defined ARDUINO_ARCH_ESP32
 #define WIFI
 #if !defined WOKWI
 #define OTA
@@ -92,6 +93,8 @@ BluetoothSerial SerialBT;
 #include <WebServer.h>
 #include <ESPmDNS.h>
 #include <Update.h>
+
+//#define DEBUGOTA
 
 #endif // OTA
 
@@ -239,7 +242,7 @@ struct garageData
 
 struct garageData garageData[] =
 {
-#if defined ESP32_DEVKIT_V1
+#if defined ARDUINO_ARCH_ESP32
   { 25, 18, /* 21 */ /* 23 */ /* 14 */ 17, 0, 2, 2, 0, }, // Garage 1
   { 26, /* 19 */ 16, 22, 0, 2, 2, 0, }, // Garage 2
   // any number of garages can be added
@@ -552,7 +555,7 @@ void callback(char* topic, byte* payload, unsigned int length)
   printSerial(topic);
   printSerial("] ");
   memset(buf, 'x', sizeof(buf) - 1);
-  buf[min(sizeof(buf) - 1, length)] = 0;
+  buf[min((unsigned int) sizeof(buf) - 1, length)] = 0;
   for (int i = 0; i < length; i++)
   {
     if (i < sizeof(buf) - 2)
@@ -571,7 +574,7 @@ void callback(char* topic, byte* payload, unsigned int length)
       printSerial(str);
     }
   }
-  buf[min(sizeof(buf) - 1, length)] = 0;
+  buf[min((unsigned int) sizeof(buf) - 1, length)] = 0;
   if (print)
   {
     if (checkCode(buf))
@@ -646,7 +649,9 @@ void mainMenu()
   "<h3>" myName "</h3>"
   "<table>"
   "<tr><td><a href='/garages'><button>Garages</button></a></td></tr>"
+#if defined LOGGING
   "<tr><td><a href='/log'><button>Log</button></a></td></tr>"
+#endif
   "<tr><td><a href='/info'><button>Info</button></a></td></tr>"
   "<tr><td><a href='/reset'><button>Reset</button></a></td></tr>"
   "<tr><td><a href='/upload'><button>Update firmware</button></a></td></tr>"
@@ -682,11 +687,11 @@ void garagesContent()
   server.chunkedResponseFinalize();
 }
 
+#if defined LOGGING
 void logContent()
 {
   server.chunkedResponseModeStart(200, "text/html");
 
-#if defined LOGGING
   server.sendContent("<html><head><meta name='viewport' content='width=device-width, initial-scale=1.0'></head><body>" myName " - current version " VERSIONSTRING " - Uptime: ");
   char buf[14];
   sprintf(buf, "%u:%02d:%02d:%02d", uptimeDays, (int)uptimeHours, (int)uptimeMinutes, (int)uptimeSeconds);
@@ -704,11 +709,9 @@ void logContent()
     }
   }
   server.sendContent("</fieldset><br><br><a href='/log'><button>Refresh</button></a><br><br><a href='/'><button>Main menu</button></a></body></html>");
-#else
-  server.sendContent("<html><body>" myName " - current version " VERSIONSTRING "<br><a href='/'><button>Main menu</button></a></body></html>");
-#endif
   server.chunkedResponseFinalize();
 }
+#endif
 
 void serverSendContent(char *data)
 {
@@ -723,9 +726,18 @@ void info()
   server.chunkedResponseModeStart(200, "text/html");
 
   server.sendContent("<html><head><meta name='viewport' content='width=device-width, initial-scale=1.0'></head><body>" myName " - current version " VERSIONSTRING " - Uptime: ");
-  sprintf(buf, "%u:%02d:%02d:%02d", uptimeDays, (int)uptimeHours, (int)uptimeMinutes, (int)uptimeSeconds);
+  sprintf(buf, "%u:%02d:%02d:%02d<br><br>", uptimeDays, (int)uptimeHours, (int)uptimeMinutes, (int)uptimeSeconds);
   server.sendContent(buf);
-  server.sendContent("<br><br>");
+# if ARDUINO_ARCH_ESP32
+  sprintf(buf, "Heap max size: %d<br>", ESP.getMaxAllocHeap());
+  server.sendContent(buf);
+  sprintf(buf, "Heap size: %d<br>", ESP.getFreeHeap());
+  server.sendContent(buf);
+  sprintf(buf, "Sketch size: %d<br>", ESP.getSketchSize());
+  server.sendContent(buf);
+  sprintf(buf, "Free sketch space: %d<br>", ESP.getFreeSketchSpace());   
+  server.sendContent(buf);
+# endif
 
 # if defined WIFI
   extern void printWiFi(void (*callback)(char *));
@@ -845,6 +857,7 @@ void setupOTA()
     });
   }
 
+#if defined LOGGING
   /*logs*/
   server.on("/log", HTTP_GET, []()
   {
@@ -855,6 +868,7 @@ void setupOTA()
     }
     logContent();
   });
+#endif
 
   /*info*/
   server.on("/info", HTTP_GET, []()
@@ -908,28 +922,92 @@ void setupOTA()
     HTTPUpload& upload = server.upload();
     if (upload.status == UPLOAD_FILE_START)
     {
-      Serial.printf("Update: %s\n", upload.filename.c_str());
+#if defined DEBUGOTA      
+      printSerial("Heap before btStop: ");
+      printSerialInt(ESP.getFreeHeap());
+      printSerialln();
+#endif
+#if defined SERIALBT
+      btStop();  // free BT memory before OTA
+#if defined DEBUGOTA
+      printSerial("Heap after btStop: ");
+      printSerialInt(ESP.getFreeHeap());
+      printSerialln();
+#endif
+#endif
+#if defined DEBUGOTA
+      printSerial("Update: ");
+      printSerialln((char *)upload.filename.c_str());
+#endif
       if (!Update.begin(UPDATE_SIZE_UNKNOWN))
       { //start with max available size
+#if defined DEBUGOTA
         Update.printError(Serial);
+#endif
       }
-    } else if (upload.status == UPLOAD_FILE_WRITE)
+
+#if defined DEBUGOTA
+      printSerial("Free OTA space: ");
+      printSerialInt(Update.size());
+      printSerialln();
+      printSerial("Sketch size: ");
+      printSerialInt(ESP.getSketchSize());
+      printSerialln();
+      printSerial("Free sketch space: ");
+      printSerialInt(ESP.getFreeSketchSpace());
+      printSerialln();
+#endif
+    }
+    else if (upload.status == UPLOAD_FILE_WRITE)
     {
+#if defined DEBUGOTA
+      printSerial("Heap: ");
+      printSerialInt(ESP.getFreeHeap());
+      printSerial(" chunk: ");
+      printSerialInt(upload.currentSize);
+      printSerialln();
+      printSerial("Writing chunk: ");
+      printSerialInt(upload.currentSize);
+      printSerialln(" bytes");
+#endif
       /* flashing firmware to ESP*/
       if (Update.write(upload.buf, upload.currentSize) != upload.currentSize)
       {
+#if defined DEBUGOTA
         Update.printError(Serial);
+#endif
       }
-    } else if (upload.status == UPLOAD_FILE_END)
+    }
+    else if (upload.status == UPLOAD_FILE_ABORTED)
+    {
+#if defined DEBUGOTA
+      printSerialln("UPLOAD ABORTED");
+#endif
+      Update.abort();
+    }
+    else if (upload.status == UPLOAD_FILE_END)
     {
       if (Update.end(true))
       { //true to set the size to the current progress
-        Serial.printf("Update Success: %u\nRebooting...\n", upload.totalSize);
-      } else
+#if defined DEBUGOTA
+        printSerial("Update Success: ");
+        printSerialInt(upload.totalSize);
+        printSerialln();
+        printSerialln("Rebooting...");
+#endif
+      } 
+      else
       {
+#if defined DEBUGOTA
         Update.printError(Serial);
+#endif
       }
     }
+#if defined DEBUGOTA
+    if (Update.hasError()) {
+      printSerialln((char *)Update.errorString());
+    }
+#endif
   });
 
   server.begin();
@@ -971,13 +1049,24 @@ void printWiFi(void (*callback)(char *))
 
 void wifiBegin()
 {
+  delay(500);
   WiFi.disconnect(); // Ensure no active connection during the scan
-  delay(1000);
+  delay(500);
+  WiFi.scanDelete();
+  delay(500);
+
+  int maxSignal = -1000;
 
   // Search all routers that give this SSID signal
   // Determine the best signal
-  int numNetworks = WiFi.scanNetworks(false, false, false, 0, 300, WIFISSID);
-  int maxSignal = -1000;
+  int numNetworks = WiFi.scanNetworks(false, false, false, 300, 0, WIFISSID);
+
+  {
+    char buf[255];
+    sprintf(buf, "WIFISSID: %s, numNetworks: %d", WIFISSID, numNetworks);
+    printSerialln(buf);
+  }
+
   for (int i = 0; i < numNetworks; i++)
   {
     char buf[255];
@@ -1085,7 +1174,7 @@ void setup()
 
   SetupReset();
 
-# if defined ESP32_DEVKIT_V1
+# if defined ARDUINO_ARCH_ESP32
     Serial.begin(115200);
 # else
     Serial.begin(9600);
@@ -1195,16 +1284,82 @@ void setup()
 
 void loop()
 {
+    unsigned long looptime = millis();
+    unsigned long looptime1 = looptime;
+    unsigned long looptime2 = looptime;
+    unsigned long looptime3 = looptime;
+    unsigned long looptime4 = looptime;
+    unsigned long looptime5 = looptime;
+    unsigned long looptime6 = looptime;
+    unsigned long looptime7 = looptime;
+    unsigned long looptime8 = looptime;
+    unsigned long looptime9 = looptime;
+    
     reconnect();
+
+    looptime1 = millis();
+    if (looptime1 - looptime > 1000)
+    {
+      char buf[50];
+
+      sprintf(buf, "More than 1 second from loop start 1 (%d ms)", looptime1 - looptime);
+      printSerialln(buf);
+      message(buf);
+    }
+
     if (mqttClient.connected())
     {
+      looptime2 = millis();
+      if (looptime2 - looptime > 1000)
+      {
+        char buf[50];
+
+        sprintf(buf, "More than 1 second from loop start 2 (%d ms, %d ms)", looptime2 - looptime, looptime1 - looptime);
+        printSerialln(buf);
+        message(buf);
+      }
+
       statusGarages();
+      looptime3 = millis();
+      if (looptime3 - looptime > 1000)
+      {
+        char buf[50];
+
+        sprintf(buf, "More than 1 second from loop start 3 (%d ms, %d ms, %d ms)", looptime3 - looptime, looptime2 - looptime, looptime1 - looptime);
+        printSerialln(buf);
+        message(buf);
+      }
+
       mqttClient.loop();
+
+      looptime4 = millis();
+      if (looptime4 - looptime > 1000)
+      {
+        char buf[50];
+
+        sprintf(buf, "More than 1 second from loop start 4 (%d ms, %d ms, %d ms, %d ms)", looptime4 - looptime, looptime3 - looptime, looptime2 - looptime, looptime1 - looptime);
+        printSerialln(buf);
+        message(buf);
+      }
+    }
+    else
+    {
+      printSerialln("Not connected");
     }
 
 #if defined OTA
     server.handleClient();
 #endif
+
+    looptime5 = millis();
+    if (looptime5 - looptime > 1000)
+    {
+      char buf[50];
+
+      sprintf(buf, "More than 1 second from loop start 5 (%d ms, %d ms, %d ms, %d ms, %d ms)", looptime5 - looptime, looptime4 - looptime, looptime3 - looptime, looptime2 - looptime, looptime1 - looptime);
+      printSerialln(buf);
+      message(buf);
+    }
 
     if (millis() - mytime > 1000) // every second
     {
@@ -1235,8 +1390,28 @@ void loop()
       if (uptimeSeconds == 0) // every minute
         checkBSSID();
 
-      if (uptimeMinutes == 0) // every hour
+      looptime6 = millis();
+      if (looptime6 - looptime > 1000)
+      {
+        char buf[50];
+
+        sprintf(buf, "More than 1 second from loop start 6 (%d ms, %d ms, %d ms, %d ms, %d ms, %d ms)", looptime6 - looptime, looptime5 - looptime, looptime4 - looptime, looptime3 - looptime, looptime2 - looptime, looptime1 - looptime);
+        printSerialln(buf);
+        message(buf);
+      }
+
+      if (uptimeMinutes == 0 && uptimeSeconds == 0) // every hour
         checkRSSI();
+
+      looptime7 = millis();
+      if (looptime7 - looptime > 1000)
+      {
+        char buf[50];
+
+        sprintf(buf, "More than 1 second from loop start 7 (%d ms, %d ms, %d ms, %d ms, %d ms, %d ms, %d ms)", looptime7 - looptime, looptime6 - looptime, looptime5 - looptime, looptime4 - looptime, looptime3 - looptime, looptime2 - looptime, looptime1 - looptime);
+        printSerialln(buf);
+        message(buf);
+      }
 
       char buf[50];
 
@@ -1247,10 +1422,30 @@ void loop()
       {
         mqttClient.publish(MQTTid "/UpTime", buf, true);
 
+        looptime8 = millis();
+        if (looptime8 - looptime > 1000)
+        {
+          char buf[50];
+
+          sprintf(buf, "More than 1 second from loop start 8 (%d ms, %d ms, %d ms, %d ms, %d ms, %d ms, %d ms, %d ms)", looptime8 - looptime, looptime7 - looptime, looptime6 - looptime, looptime5 - looptime, looptime4 - looptime, looptime3 - looptime, looptime2 - looptime, looptime1 - looptime);
+          printSerialln(buf);
+          message(buf);
+        }
+
         static int rssi_avg = -1000;
         rssi_avg = rssi_avg == -1000 ? WiFi.RSSI() : (rssi_avg * 9 + WiFi.RSSI()) / 10;
         sprintf(buf, "%d", rssi_avg);
         mqttClient.publish(MQTTid "/RSSI", buf, true);
+
+        looptime9 = millis();
+        if (looptime9 - looptime > 1000)
+        {
+          char buf[50];
+
+          sprintf(buf, "More than 1 second from loop start 9 (%d ms, %d ms, %d ms, %d ms, %d ms, %d ms, %d ms, %d ms, %d ms)", looptime9 - looptime, looptime8 - looptime, looptime7 - looptime, looptime6 - looptime, looptime5 - looptime, looptime4 - looptime, looptime3 - looptime, looptime2 - looptime, looptime1 - looptime);
+          printSerialln(buf);
+          message(buf);
+        }
       }
       else
       {
