@@ -60,6 +60,7 @@
 #define maxLogSize 100
 int logsIndex = 0;
 int logOffset = 0;
+unsigned long logTimeStamps[maxNLogs];
 char logs[maxNLogs][maxLogSize];
 #endif
 
@@ -274,10 +275,16 @@ unsigned char uptimeMinutes = 0;
 unsigned char uptimeSeconds = 0;
 
 #if defined LOGGING
+
+unsigned long Time2Seconds(unsigned int days, unsigned char hours, unsigned char minutes, unsigned char seconds)
+{
+  return ((unsigned long)uptimeSeconds + ((unsigned long)uptimeMinutes + ((unsigned long)uptimeHours + ((unsigned long)uptimeDays) * 24) * 60) * 60);
+}
+
 void KeepMessage(char *data)
 {
   if (logOffset == 0)
-    logOffset += sprintf(logs[logsIndex], "%u:%02d:%02d:%02d: ", uptimeDays, (int)uptimeHours, (int)uptimeMinutes, (int)uptimeSeconds);
+    logTimeStamps[logsIndex] = Time2Seconds(uptimeDays, uptimeHours, uptimeMinutes, uptimeSeconds);
   logOffset += snprintf(logs[logsIndex] + logOffset, maxLogSize - logOffset - 1, "%s", data);
 }
 #endif
@@ -440,7 +447,7 @@ void reconnect()
             }
             else
             {
-              printSerialln(" try again in 5 seconds");
+              printSerialln(" Try again in 5 seconds");
               // Wait 5 seconds before retrying
               msWait = millis();
             }
@@ -479,7 +486,7 @@ void statusGarage(int index, int statusGarageOpenPin, int statusGarageClosePin, 
     if (statusGarageClosePin == 0)
       statusGarageClose0 = !statusGarageOpen0;
 
-    printSerial("change garage ");
+    printSerial("Change garage ");
     printSerialInt(index + 1);
     printSerial(" status: ");
     printSerialInt(statusGarageOpen0);
@@ -693,8 +700,9 @@ void logContent()
   server.chunkedResponseModeStart(200, "text/html");
 
   server.sendContent("<html><head><meta name='viewport' content='width=device-width, initial-scale=1.0'></head><body>" myName " - current version " VERSIONSTRING " - Uptime: ");
-  char buf[14];
+  char buf[15];
   sprintf(buf, "%u:%02d:%02d:%02d", uptimeDays, (int)uptimeHours, (int)uptimeMinutes, (int)uptimeSeconds);
+  unsigned long secondsNow = Time2Seconds(uptimeDays, uptimeHours, uptimeMinutes, uptimeSeconds);
   server.sendContent(buf);
   server.sendContent("<br><br><fieldset style='display: inline-block; border: 2px solid black; padding: 10px;'><legend style='font-weight: bold; padding: 0 5px;'>Message history</legend>");
   int j = logsIndex - 1;
@@ -704,6 +712,15 @@ void logContent()
       j = 0;
     if (logs[j][0])
     {
+      unsigned long seconds = secondsNow - logTimeStamps[j];
+      unsigned long minutes = seconds / 60;
+      seconds -= minutes * 60;
+      unsigned long hours = minutes / 60;
+      minutes -= hours * 60;
+      unsigned long days = hours / 24;
+      hours -= days * 24;
+      sprintf(buf, "-%u:%02d:%02d:%02d: ", (unsigned int)days, (int)hours, (int)minutes, (int)seconds);
+      server.sendContent(buf);
       server.sendContent(logs[j]);
       server.sendContent("<br>");
     }
