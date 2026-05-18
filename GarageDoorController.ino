@@ -1167,11 +1167,10 @@ void checkRSSI()
   rssi = WiFi.RSSI();
   if (rssi < RSSI_POOR_THRESHOLD_DBM)
   {
-    int numNetworks = WiFi.scanNetworks(false, false, false, 0, 300, WIFISSID);
+    int numNetworks = WiFi.scanNetworks(false, false, false, 300, 0, WIFISSID);
     int i;
     for (i = 0; i < numNetworks && (equalBSSIDs(BSSID, WiFi.BSSID(i)) || WiFi.RSSI(i) < rssi + RSSI_GOOD_HYSTERESIS_DB); i++)
       ;
-    WiFi.scanDelete();
     if (i < numNetworks)
     {
       printSerialln("Better RSSI found, reconnecting WiFi");
