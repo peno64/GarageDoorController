@@ -272,7 +272,7 @@ unsigned long messageTime = 0;
 unsigned int uptimeDays = 0;
 unsigned char uptimeHours = 0;
 unsigned char uptimeMinutes = 0;
-unsigned char uptimeSeconds = 0;
+unsigned char uptimeSeconds = 1;
 
 #if defined LOGGING
 
