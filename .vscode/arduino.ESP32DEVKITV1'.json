@@ -1,0 +1,21 @@
+{
+  "port": "COM4",
+  "configuration": "UploadSpeed=921600,FlashFreq=80,PartitionScheme=min_spiffs,DebugLevel=none,EraseFlash=none",
+  "output": "build",
+  "board": "esp32:esp32:esp32doit-devkit-v1-bis",
+  "programmer": "esptool",
+  "useProgrammer": false,
+  "configurationRequired": true,
+  "monitorPortSettings": {
+    "settings": {
+      "port": "COM4",
+      "baudRate": 115200,
+      "lineEnding": "\r\n",
+      "dataBits": 8,
+      "parity": "none",
+      "stopBits": "one"
+    },
+    "profile_name": ""
+  },
+  "optimize_for_debug": false
+}

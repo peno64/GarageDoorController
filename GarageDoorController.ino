@@ -43,6 +43,8 @@
 #endif
 #define MQTTcmd MQTTid "Cmd"
 
+#define MQTTEMPTY " " // " " must be used to make sure that MQTT retains it. "" clears MQTT messages with result that a restart of home assistant would give Unknown
+
 #define ReconnectWaitSeconds 5
 #define ReconnectRebootMinutes 30
 
@@ -64,6 +66,7 @@
 int logsIndex = 0;
 int logOffset = 0;
 bool logDateTime = false;
+bool timeConfiged = false;
 unsigned long logTimeStamps[maxNLogs];
 char logs[maxNLogs][maxLogSize];
 #endif
@@ -293,24 +296,27 @@ void KeepMessage(char *data)
   if (logOffset == 0)
   {
 #if defined LOGDATETIME
-    static bool firstTime = true;
-    if (firstTime || logDateTime)
+    if (timeConfiged)
     {
-      struct tm timeinfo;
-      if (getLocalTime(&timeinfo, firstTime ? 10000 : 10))
+      static bool firstTime = true;
+      if (firstTime || logDateTime)
       {
-        logDateTime = true;
-        logOffset += snprintf(logs[logsIndex], maxLogSize - 1, "%04d-%02d-%02dT%02d:%02d:%02d: ",
-                      timeinfo.tm_year + 1900,
-                      timeinfo.tm_mon + 1,
-                      timeinfo.tm_mday,
-                      timeinfo.tm_hour,
-                      timeinfo.tm_min,
-                      timeinfo.tm_sec);
+        struct tm timeinfo;
+        if (getLocalTime(&timeinfo, firstTime ? 10000 : 10))
+        {
+          logDateTime = true;
+          logOffset += snprintf(logs[logsIndex], maxLogSize - 1, "%04d-%02d-%02dT%02d:%02d:%02d: ",
+                        timeinfo.tm_year + 1900,
+                        timeinfo.tm_mon + 1,
+                        timeinfo.tm_mday,
+                        timeinfo.tm_hour,
+                        timeinfo.tm_min,
+                        timeinfo.tm_sec);
+        }
+        else if (firstTime)
+          logDateTime = false;
+        firstTime = false;
       }
-      else if (firstTime)
-        logDateTime = false;
-      firstTime = false;
     }
 #endif
     if (!logDateTime)
@@ -415,7 +421,7 @@ void clearMessageWhenNeeded()
 {
   if (messageTime != 0 && (millis() - messageTime >= clearMessageTimeout))
   {
-    message("");
+    message(MQTTEMPTY);
     messageTime = 0;
   }
 }
@@ -517,6 +523,7 @@ void statusGarage(int index, int statusGarageOpenPin, int statusGarageClosePin, 
     if (statusGarageClosePin == 0)
       statusGarageClose0 = !statusGarageOpen0;
 
+    /*
     printSerial("Change garage ");
     printSerialInt(index + 1);
     printSerial(" status: ");
@@ -528,7 +535,8 @@ void statusGarage(int index, int statusGarageOpenPin, int statusGarageClosePin, 
     printSerial(" - statusGarageClosePin: ");
     printSerialInt(statusGarageClosePin);
     printSerialln();
-
+    */
+   
     if ((statusGarageOpen0 && statusGarageClose0) ||
         (statusGarageOpenPin == 0) ||
         (statusGarageClosePin == 0))
@@ -545,7 +553,7 @@ void statusGarage(int index, int statusGarageOpenPin, int statusGarageClosePin, 
 
     if ((statusGarageOpen == 0 && statusGarageClose != 0) ||
         (statusGarageOpen != 0 && statusGarageClose == 0))
-      message("");
+      message(MQTTEMPTY);
 
     printSerial(buf2);
     printSerial(": ");
@@ -589,7 +597,7 @@ void callback(char* topic, byte* payload, unsigned int length)
   char str[2] = " ";
   bool print = true;
 
-  printSerial("Message arrived [");
+  printSerial("MQTT message arrived [");
   printSerial(topic);
   printSerial("] ");
   memset(buf, 'x', sizeof(buf) - 1);
@@ -661,7 +669,7 @@ void callback(char* topic, byte* payload, unsigned int length)
         sprintf(buf, MQTTcmd "/Switch%d", index + 1);
         if (strcmp(topic, buf) == 0)
         {
-          message("");
+          message(MQTTEMPTY);
           sprintf(buf, "Switch garage %d", index + 1);
           message(buf);
 
@@ -720,7 +728,7 @@ void garagesContent()
     server.sendContent("'><button>Switch</button></a></td></tr>");
   }
 
-  server.sendContent("</table><br><a href='/garages'><button>Refresh</button></a><br><br><a href='/'><button>Main menu</button></a>");
+  server.sendContent("</table><br><a href='/garages'><button>Refresh</button></a><br><br><a href='/'><button>Main menu</button></a></body></html>");
 
   server.chunkedResponseFinalize();
 }
@@ -899,12 +907,16 @@ void setupOTA()
         return server.requestAuthentication();
       }
 
+      printSerial("Web switch garage ");
+      printSerialInt(index + 1);
+      printSerialln();
+
       switchGarage(index);
 
-      delay(1000);
+      //delay(1000);
 
       server.sendHeader("Connection", "close");
-      server.send(200, "text/html", "<html><head><meta http-equiv='refresh' content='0;url=/garages'></head><body><a href='/'><button>Main menu</button></a></body></html>");
+      server.send(200, "text/html", "<html><head><meta http-equiv='refresh' content='1;url=/garages'></head><body>Reloading in a second...</body></html>");
     });
   }
 
@@ -1175,6 +1187,7 @@ void wifiBegin()
 
 #if defined LOGGING && defined LOGDATETIME
   configTime(3600, 3600, "pool.ntp.org", "time.nist.gov");
+  timeConfiged = true;
 #endif
 
   uint8_t* currentBSSID = WiFi.BSSID();
@@ -1385,10 +1398,37 @@ void loop()
     unsigned long looptime8 = looptime;
     unsigned long looptime9 = looptime;
     unsigned long looptime10 = looptime;
+    unsigned long looptime11 = looptime;
+
+    if (WiFi.status() != WL_CONNECTED)
+    {
+      printSerial("WiFi disconnected 1, status: ");
+      printSerialInt(WiFi.status());
+      printSerialln();
+    }
+    if (!mqttClient.connected())
+    {
+      printSerial("MQTT not connected 1, state: ");
+      printSerialInt(mqttClient.state());
+      printSerialln();
+    }
 
 #if defined OTA
     server.handleClient();
 #endif
+
+    if (WiFi.status() != WL_CONNECTED)
+    {
+      printSerial("WiFi disconnected 2, status: ");
+      printSerialInt(WiFi.status());
+      printSerialln();
+    }
+    if (!mqttClient.connected())
+    {
+      printSerial("MQTT not connected 2, state: ");
+      printSerialInt(mqttClient.state());
+      printSerialln();
+    }
 
     looptime1 = millis();
     if (looptime1 - looptime > 1000)
@@ -1512,7 +1552,7 @@ void loop()
       //printSerialln(buf);
       if (mqttClient.connected())
       {
-        mqttClient.publish(MQTTid "/UpTime", buf, true);
+        mqttClient.loop();
 
         looptime8 = millis();
         if (looptime8 - looptime > 1000)
@@ -1524,10 +1564,7 @@ void loop()
           message(buf);
         }
 
-        static int rssi_avg = -1000;
-        rssi_avg = rssi_avg == -1000 ? WiFi.RSSI() : (rssi_avg * 9 + WiFi.RSSI()) / 10;
-        sprintf(buf, "%d", rssi_avg);
-        mqttClient.publish(MQTTid "/RSSI", buf, true);
+        mqttClient.publish(MQTTid "/UpTime", buf, true);
 
         looptime9 = millis();
         if (looptime9 - looptime > 1000)
@@ -1538,15 +1575,30 @@ void loop()
           printSerialln(buf);
           message(buf);
         }
-      
-        mqttClient.loop();
 
+        static int rssi_avg = -1000;
+        rssi_avg = rssi_avg == -1000 ? WiFi.RSSI() : (rssi_avg * 9 + WiFi.RSSI()) / 10;
+        sprintf(buf, "%d", rssi_avg);
+        mqttClient.publish(MQTTid "/RSSI", buf, true);
+        
         looptime10 = millis();
         if (looptime10 - looptime > 1000)
         {
           char buf[200];
 
           sprintf(buf, "More than 1 second from loop start 10 (%d ms, %d ms, %d ms, %d ms, %d ms, %d ms, %d ms, %d ms, %d ms, %d ms)", looptime10 - looptime, looptime9 - looptime, looptime8 - looptime, looptime7 - looptime, looptime6 - looptime, looptime5 - looptime, looptime4 - looptime, looptime3 - looptime, looptime2 - looptime, looptime1 - looptime);
+          printSerialln(buf);
+          message(buf);
+        }
+
+        mqttClient.loop();
+
+        looptime11 = millis();
+        if (looptime11 - looptime > 1000)
+        {
+          char buf[200];
+
+          sprintf(buf, "More than 1 second from loop start 11 (%d ms, %d ms, %d ms, %d ms, %d ms, %d ms, %d ms, %d ms, %d ms, %d ms, %d ms)", looptime11 - looptime, looptime10 - looptime, looptime9 - looptime, looptime8 - looptime, looptime7 - looptime, looptime6 - looptime, looptime5 - looptime, looptime4 - looptime, looptime3 - looptime, looptime2 - looptime, looptime1 - looptime);
           printSerialln(buf);
           message(buf);
         }
@@ -1568,7 +1620,8 @@ void loop()
         looptime7 - looptime > 1000 ||
         looptime8 - looptime > 1000 ||
         looptime9 - looptime > 1000 ||
-        looptime10 - looptime > 1000)
+        looptime10 - looptime > 1000 ||
+        looptime11 - looptime > 1000)
       sendWebhook();
 
     clearMessageWhenNeeded();
