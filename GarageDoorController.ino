@@ -131,6 +131,10 @@ input_text:
     max: 100  # Optioneel: maximumwaarde
     mode: password  # Optioneel: invoermodus (text of password)
     icon: mdi:keyboard  # Optioneel: pictogram voor de invoer
+  garagesoffline:
+    name: Garages Offline
+    initial: ""
+    max: 1
 
 mqtt:
   sensor:
@@ -159,59 +163,41 @@ mqtt:
       unique_id: "GarageMessage"
       state_topic: "Garage/Message"
 
-switch:
-  - platform: template
-    switches:
-      mqtt_button1:
-        friendly_name: "Garage Switch1"
-        value_template: ""
+  button:
+    - name: "ResetGarages"
+      command_topic: "GarageCmd/Reset"
+      
+template:
+  - switch:
+      - name: Garage Switch1
         turn_on:
-          service: mqtt.publish
-          data:
-            topic: "GarageCmd/Switch1"
-            payload: "{{ states('input_text.garagecode_input') }}"
+          - service: script.Switch_garage1
+            data:
+              code: ""
         turn_off:
-          service: mqtt.publish
-          data:
-            topic: "GarageCmd/Switch1"
-            payload: "{{ states('input_text.garagecde_input') }}"
-  - platform: template
-    switches:
-      mqtt_button2:
-        friendly_name: "Garage Switch2"
-        value_template: ""
+          - service: script.Switch_garage1
+            data:
+              code: "{{ states('input_text.garagecode_input') }}"
+        default_entity_id: switch.mqtt_button1
+        state: ''
+  - switch:
+      - name: Garage Switch2
         turn_on:
-          service: mqtt.publish
-          data:
-            topic: "GarageCmd/Switch2"
-            payload: "{{ states('input_text.garagecode_input') }}"
+          - service: script.Switch_garage2
+            data:
+              code: ""
         turn_off:
-          service: mqtt.publish
-          data:
-            topic: "GarageCmd/Switch2"
-            payload: "{{ states('input_text.garagecode_input') }}"
+          - service: script.Switch_garage2
+            data:
+              code: "{{ states('input_text.garagecode_input') }}"
+        default_entity_id: switch.mqtt_button2
+        state: ''
 
 recorder:
   exclude:
     entities:
+      - input_text.garagecode_input
       - sensor.garageuptime
-
-automations.yaml:
-
-- id: '5154208397015'
-  alias: Empty garage code on switch garage
-  description: ''
-  trigger:
-  - platform: state
-    entity_id:
-    - sensor.GarageMessage
-  action:
-  - service: input_text.set_value
-    target:
-      entity_id: input_text.garagecode_input
-    data:
-      value: ''
-
 
 */
 
@@ -450,6 +436,8 @@ void reconnectMQTT()
         // Attempt to connect
         if (mqttClient.connect(myName, MQTTUSER, MQTTPASSWORD, MQTTid "/Message", 1, true, "Offline"))
         {
+          message(MQTTEMPTY);
+
           IPAddress ip;
 #         if defined WIFI
             ip = WiFi.localIP();
@@ -593,88 +581,95 @@ void switchGarage(int index)
 
 void callback(char* topic, byte* payload, unsigned int length)
 {
-  char buf[sizeof(GARAGEDOORCODE) + 1];
-  char str[2] = " ";
-  bool print = true;
-
-  printSerial("MQTT message arrived [");
-  printSerial(topic);
-  printSerial("] ");
-  memset(buf, 'x', sizeof(buf) - 1);
-  buf[min((unsigned int) sizeof(buf) - 1, length)] = 0;
-  for (int i = 0; i < length; i++)
+  if (strcmp(topic, MQTTcmd "/Reset") == 0)
   {
-    if (i < sizeof(buf) - 2)
-      buf[i] = (char)payload[i];
-    else
-    {
-      print = false;
-      if (i == sizeof(buf) - 2)
-      {
-        char c = buf[i];
-        buf[i] = 0;
-        printSerial(buf);
-        buf[i] = c;
-      }
-      str[0] = (char)payload[i];
-      printSerial(str);
-    }
+    DoReset();
   }
-  buf[min((unsigned int) sizeof(buf) - 1, length)] = 0;
-  if (print)
+  else
   {
-    if (checkCode(buf))
-      printSerial("*");
-    else
-      printSerial(buf);
-  }
+    char buf[sizeof(GARAGEDOORCODE) + 1];
+    char str[2] = " ";
+    bool print = true;
 
-  printSerialln();
-  printSerial("length: ");
-  printSerialInt(length);
-  printSerialln();
-
-  if (*buf)
-  {
-    if (nFailedCodes >= maxRetries)
+    printSerial("MQTT message arrived [");
+    printSerial(topic);
+    printSerial("] ");
+    memset(buf, 'x', sizeof(buf) - 1);
+    buf[min((unsigned int) sizeof(buf) - 1, length)] = 0;
+    for (int i = 0; i < length; i++)
     {
-      if (millis() - prevFail > 60000L)
-        nFailedCodes = 0;
+      if (i < sizeof(buf) - 2)
+        buf[i] = (char)payload[i];
       else
-        message("Wait a minute...");
+      {
+        print = false;
+        if (i == sizeof(buf) - 2)
+        {
+          char c = buf[i];
+          buf[i] = 0;
+          printSerial(buf);
+          buf[i] = c;
+        }
+        str[0] = (char)payload[i];
+        printSerial(str);
+      }
     }
-
-    if (nFailedCodes < maxRetries)
+    buf[min((unsigned int) sizeof(buf) - 1, length)] = 0;
+    if (print)
     {
       if (checkCode(buf))
-        nFailedCodes = 0;
+        printSerial("*");
       else
-      {
-        message("Wrong code");
-        prevFail = millis();
-        nFailedCodes++;
-      }
+        printSerial(buf);
     }
 
-    printSerial("nFailedCodes: ");
-    printSerialInt(nFailedCodes);
+    printSerialln();
+    printSerial("length: ");
+    printSerialInt(length);
     printSerialln();
 
-    if (nFailedCodes == 0)
+    if (*buf)
     {
-      for (int index = 0; index < nGarages; index++)
+      if (nFailedCodes >= maxRetries)
       {
-        char buf[255];
+        if (millis() - prevFail > 60000L)
+          nFailedCodes = 0;
+        else
+          message("Wait a minute...");
+      }
 
-        sprintf(buf, MQTTcmd "/Switch%d", index + 1);
-        if (strcmp(topic, buf) == 0)
+      if (nFailedCodes < maxRetries)
+      {
+        if (checkCode(buf))
+          nFailedCodes = 0;
+        else
         {
-          message(MQTTEMPTY);
-          sprintf(buf, "Switch garage %d", index + 1);
-          message(buf);
+          message("Wrong code");
+          prevFail = millis();
+          nFailedCodes++;
+        }
+      }
 
-          switchGarage(index);
-          break;
+      printSerial("nFailedCodes: ");
+      printSerialInt(nFailedCodes);
+      printSerialln();
+
+      if (nFailedCodes == 0)
+      {
+        for (int index = 0; index < nGarages; index++)
+        {
+          char buf[255];
+
+          sprintf(buf, MQTTcmd "/Switch%d", index + 1);
+          if (strcmp(topic, buf) == 0)
+          {
+            message(MQTTEMPTY);
+            sprintf(buf, "Switch garage %d", index + 1);
+            message(buf);
+
+            switchGarage(index);
+            break;
+          }
         }
       }
     }
@@ -1576,9 +1571,9 @@ void loop()
           message(buf);
         }
 
-        static int rssi_avg = -1000;
-        rssi_avg = rssi_avg == -1000 ? WiFi.RSSI() : (rssi_avg * 9 + WiFi.RSSI()) / 10;
-        sprintf(buf, "%d", rssi_avg);
+        static double rssi_avg = -1000.0;
+        rssi_avg = rssi_avg == -1000.0 ? WiFi.RSSI() : (rssi_avg * 9.0 + (double)WiFi.RSSI()) / 10.0;
+        sprintf(buf, "%d", (int)(rssi_avg + 0.5));
         mqttClient.publish(MQTTid "/RSSI", buf, true);
         
         looptime10 = millis();
