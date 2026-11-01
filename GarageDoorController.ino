@@ -179,7 +179,7 @@ template:
             data:
               code: "{{ states('input_text.garagecode_input') }}"
         default_entity_id: switch.mqtt_button1
-        state: ''
+        state: "{{ none }}"
   - switch:
       - name: Garage Switch2
         turn_on:
@@ -191,7 +191,7 @@ template:
             data:
               code: "{{ states('input_text.garagecode_input') }}"
         default_entity_id: switch.mqtt_button2
-        state: ''
+        state: "{{ none }}"
 
 recorder:
   exclude:
