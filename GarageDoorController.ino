@@ -52,7 +52,7 @@
 # define SERIALBT
 #endif
 
-#undef SERIALBT // eats up alot of heap space and results in hanging OAT upload
+#undef SERIALBT // eats up alot of heap space and results in hanging OTA upload
 
 #undef LOGGING
 #define LOGGING
@@ -813,7 +813,7 @@ const char *uploadContent =
    "Update firmware " myName " (current version " VERSIONSTRING ")"
    "<br>"
    "<br>"
-   "<input type='file' name='update'>"
+   "<input type='file' name='update' id='firmwareFile' required>"
    "<br>"
    "<br>"
    "<input type='submit' value='Update'>"
@@ -823,6 +823,15 @@ const char *uploadContent =
  "<script>"
   "$('form').submit(function(e){"
   "e.preventDefault();"
+  "var file = $('#firmwareFile')[0].files[0];"
+  "if (!file) {"
+  "  alert('Please select a firmware file!');"
+  "  return;"
+  "}"
+  "if (file.name.toLowerCase() !== ('" myName ".ino.bin" "').toLowerCase()) {"
+  "  alert('Incorrect firmware file!\\nExpected filename: " myName ".ino.bin" "');"
+  "  return;"
+  "}"
   "var form = $('#upload_form')[0];"
   "var data = new FormData(form);"
   " $.ajax({"
@@ -1181,7 +1190,8 @@ void wifiBegin()
   printSerialln("WiFi connected");
 
 #if defined LOGGING && defined LOGDATETIME
-  configTime(3600, 3600, "pool.ntp.org", "time.nist.gov");
+  //configTime(3600, 3600, "pool.ntp.org", "time.nist.gov");
+  configTzTime("CET-1CEST,M3.5.0,M10.5.0/3", "pool.ntp.org", "time.nist.gov");
   timeConfiged = true;
 #endif
 
@@ -1395,6 +1405,7 @@ void loop()
     unsigned long looptime10 = looptime;
     unsigned long looptime11 = looptime;
 
+#if TESTING
     if (WiFi.status() != WL_CONNECTED)
     {
       printSerial("WiFi disconnected 1, status: ");
@@ -1407,11 +1418,13 @@ void loop()
       printSerialInt(mqttClient.state());
       printSerialln();
     }
+#endif
 
 #if defined OTA
     server.handleClient();
 #endif
 
+#if TESTING
     if (WiFi.status() != WL_CONNECTED)
     {
       printSerial("WiFi disconnected 2, status: ");
@@ -1424,6 +1437,7 @@ void loop()
       printSerialInt(mqttClient.state());
       printSerialln();
     }
+#endif
 
     looptime1 = millis();
     if (looptime1 - looptime > 1000)
@@ -1483,10 +1497,12 @@ void loop()
         message(buf);
       }
     }
+#if TESTING    
     else
     {
       printSerialln("Not connected");
     }
+#endif
 
     if (millis() - mytime > 1000) // every second
     {
@@ -1598,12 +1614,14 @@ void loop()
           message(buf);
         }
       }
+#if TESTING
       else
       {
         printSerialln("MQTT not connected...");
         printSerial("Uptime: ");
         printSerialln(buf);
       }
+#endif
     }
 
     if (looptime1 - looptime > 1000 ||
