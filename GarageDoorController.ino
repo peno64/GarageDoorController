@@ -1367,6 +1367,8 @@ void setup()
   nFailedCodes = 0;
 }
 
+#if defined LOGSLOWLOOP
+
 void sendWebhook()
 {
     WiFiClient client;
@@ -1398,8 +1400,11 @@ void sendWebhook()
     client.stop();
 }
 
+#endif
+
 void loop()
 {
+#if defined LOGSLOWLOOP  
     unsigned long looptime = millis();
     unsigned long looptime1 = looptime;
     unsigned long looptime2 = looptime;
@@ -1412,6 +1417,7 @@ void loop()
     unsigned long looptime9 = looptime;
     unsigned long looptime10 = looptime;
     unsigned long looptime11 = looptime;
+#endif
 
 #if TESTING
     if (WiFi.status() != WL_CONNECTED)
@@ -1447,6 +1453,7 @@ void loop()
     }
 #endif
 
+#if defined LOGSLOWLOOP
     looptime1 = millis();
     if (looptime1 - looptime > 1000)
     {
@@ -1456,9 +1463,11 @@ void loop()
       printSerialln(buf);
       message(buf);
     }
+#endif
 
     reconnectMQTT();
 
+#if defined LOGSLOWLOOP
     looptime2 = millis();
     if (looptime2 - looptime > 1000)
     {
@@ -1468,9 +1477,11 @@ void loop()
       printSerialln(buf);
       message(buf);
     }
+#endif
 
     if (mqttClient.connected())
     {
+#if defined LOGSLOWLOOP      
       looptime3 = millis();
       if (looptime3 - looptime > 1000)
       {
@@ -1480,9 +1491,11 @@ void loop()
         printSerialln(buf);
         message(buf);
       }
+#endif
 
       statusGarages();
 
+#if defined LOGSLOWLOOP
       looptime4 = millis();
       if (looptime4 - looptime > 1000)
       {
@@ -1492,9 +1505,11 @@ void loop()
         printSerialln(buf);
         message(buf);
       }
+#endif
 
       mqttClient.loop();
 
+#if defined LOGSLOWLOOP
       looptime5 = millis();
       if (looptime5 - looptime > 1000)
       {
@@ -1504,6 +1519,7 @@ void loop()
         printSerialln(buf);
         message(buf);
       }
+#endif
     }
 #if TESTING    
     else
@@ -1541,6 +1557,7 @@ void loop()
       if (uptimeSeconds == 0) // every minute
         checkBSSID();
 
+#if defined LOGSLOWLOOP
       looptime6 = millis();
       if (looptime6 - looptime > 1000)
       {
@@ -1550,10 +1567,12 @@ void loop()
         printSerialln(buf);
         message(buf);
       }
+#endif
 
       if (uptimeMinutes == 0 && uptimeSeconds == 0) // every hour
         checkRSSI();
 
+#if defined LOGSLOWLOOP
       looptime7 = millis();
       if (looptime7 - looptime > 1000)
       {
@@ -1563,6 +1582,7 @@ void loop()
         printSerialln(buf);
         message(buf);
       }
+#endif
 
       char buf[50];
 
@@ -1573,6 +1593,7 @@ void loop()
       {
         mqttClient.loop();
 
+#if defined LOGSLOWLOOP
         looptime8 = millis();
         if (looptime8 - looptime > 1000)
         {
@@ -1582,9 +1603,11 @@ void loop()
           printSerialln(buf);
           message(buf);
         }
+#endif
 
         mqttClient.publish(MQTTid "/UpTime", buf, true);
 
+#if defined LOGSLOWLOOP
         looptime9 = millis();
         if (looptime9 - looptime > 1000)
         {
@@ -1594,12 +1617,14 @@ void loop()
           printSerialln(buf);
           message(buf);
         }
+#endif
 
         static double rssi_avg = -1000.0;
         rssi_avg = rssi_avg == -1000.0 ? WiFi.RSSI() : (rssi_avg * 9.0 + (double)WiFi.RSSI()) / 10.0;
         sprintf(buf, "%d", (int)(rssi_avg + 0.5));
         mqttClient.publish(MQTTid "/RSSI", buf, true);
         
+#if defined LOGSLOWLOOP
         looptime10 = millis();
         if (looptime10 - looptime > 1000)
         {
@@ -1609,9 +1634,11 @@ void loop()
           printSerialln(buf);
           message(buf);
         }
+#endif
 
         mqttClient.loop();
 
+#if defined LOGSLOWLOOP
         looptime11 = millis();
         if (looptime11 - looptime > 1000)
         {
@@ -1621,6 +1648,7 @@ void loop()
           printSerialln(buf);
           message(buf);
         }
+#endif
       }
 #if TESTING
       else
@@ -1632,6 +1660,7 @@ void loop()
 #endif
     }
 
+#if defined LOGSLOWLOOP
     if (looptime1 - looptime > 1000 ||
         looptime2 - looptime > 1000 ||
         looptime3 - looptime > 1000 ||
@@ -1644,6 +1673,7 @@ void loop()
         looptime10 - looptime > 1000 ||
         looptime11 - looptime > 1000)
       sendWebhook();
+#endif
 
     clearMessageWhenNeeded();
 }
