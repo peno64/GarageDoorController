@@ -4,5 +4,4 @@
 /secret.h
 /build/*
 /.vscode/c_cpp_properties.json
-/.vscode/arduino.json
 /.theia/*

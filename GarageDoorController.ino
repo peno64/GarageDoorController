@@ -1264,6 +1264,14 @@ void setup()
     delay(100);
 
     printSerialln("Setup");
+# if defined ARDUINO_ARCH_ESP32  
+    {
+      char buf[255];
+
+      sprintf(buf, "Reset reason: %d", (int)esp_reset_reason());
+      printSerialln(buf);
+    }
+#endif
 
     for (int index = 0; index < nGarages; index++)
     {
